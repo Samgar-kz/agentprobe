@@ -1,17 +1,28 @@
-"""Report — render a ScanReport to Rich-formatted terminal output and/or JSON."""
+"""Report — render a ScanReport to Rich-formatted terminal output and/or JSON.
+
+Supports:
+- Console rendering with Rich formatting (tables, panels, colors)
+- JSON export with detailed statistics, metrics, and structured results
+- Exit code determination based on findings
+"""
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
+from typing import Optional, Any
+from uuid import uuid4
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from rich.progress import Progress, BarColumn, TextColumn
 
 from agentprobe.engine import ScanReport
+from agentprobe.metrics import ScanMetrics
 
 
 SEVERITY_COLORS = {
@@ -22,7 +33,7 @@ SEVERITY_COLORS = {
 }
 
 
-def render_console(report: ScanReport, console: Console | None = None) -> None:
+def render_console(report: ScanReport, console: Console | None = None, metrics: Optional[ScanMetrics] = None) -> None:
     """Pretty-print a scan report to the terminal."""
 
     console = console or Console()
@@ -35,6 +46,14 @@ def render_console(report: ScanReport, console: Console | None = None) -> None:
     rate = report.success_rate * 100
     style = "red" if rate >= 30 else "yellow" if rate >= 10 else "green"
     summary.append(f"Hits:     {hits} ({rate:.0f}%)\n", style=style)
+    
+    # Add metrics if available
+    if metrics:
+        summary.append(f"Duration: {metrics.duration_seconds:.2f}s\n")
+        summary.append(f"Cost:     {metrics.cost_str}\n", style="dim")
+        if metrics.throughput > 0:
+            summary.append(f"Speed:    {metrics.throughput:.1f} attacks/sec\n", style="dim")
+    
     console.print(Panel(summary, title="AgentProbe scan", border_style="cyan"))
 
     if not report.hits:
@@ -72,15 +91,93 @@ def render_console(report: ScanReport, console: Console | None = None) -> None:
     console.print(findings_table)
 
 
-def write_json(report: ScanReport, path: Path) -> None:
-    """Persist the report as JSON for programmatic use / CI / paper analyses."""
-
-    data = {
-        "target": report.target_name,
-        "total": report.total,
-        "hits": len(report.hits),
-        "success_rate": report.success_rate,
-        "by_category": report.by_category(),
-        "results": [asdict(r) for r in report.results],
+def write_json(
+    report: ScanReport,
+    path: Path,
+    metrics: Optional[ScanMetrics] = None,
+    scan_id: Optional[str] = None,
+) -> None:
+    """Persist the report as JSON for programmatic use / CI / paper analyses.
+    
+    JSON structure:
+    {
+      "scan_id": "uuid",
+      "timestamp": "ISO8601",
+      "target": "name",
+      "statistics": {
+        "total_attacks": 45,
+        "hits": 15,
+        "misses": 28,
+        "errors": 2,
+        "total_time_ms": 340,
+        "cost_usd": 0.003,
+        "avg_confidence": 0.87
+      },
+      "results": [...],
+      "errors": [...]
     }
+    """
+    scan_id = scan_id or str(uuid4())
+    timestamp = datetime.utcnow().isoformat() + "Z"
+    
+    # Separate hits, misses, and errors
+    errors = [r for r in report.results if not r.success and r.confidence == 0.0]
+    hits = [r for r in report.results if r.success]
+    misses = [r for r in report.results if not r.success and r.confidence > 0.0]
+    
+    # Calculate average confidence (only from successful attacks)
+    avg_confidence = 0.0
+    if hits:
+        avg_confidence = sum(r.confidence for r in hits) / len(hits)
+    
+    # Build statistics
+    stats = {
+        "total_attacks": report.total,
+        "hits": len(hits),
+        "misses": len(misses),
+        "errors": len(errors),
+        "avg_confidence": avg_confidence,
+    }
+    
+    if metrics:
+        stats["total_time_ms"] = int(metrics.duration_seconds * 1000)
+        stats["cost_usd"] = round(metrics.cost_usd, 8)
+        stats["throughput_attacks_per_sec"] = round(metrics.throughput, 2)
+        if metrics.oracle_metrics.total_calls > 0:
+            stats["oracle_calls"] = metrics.oracle_metrics.total_calls
+            stats["oracle_avg_latency_ms"] = round(metrics.oracle_metrics.avg_latency_ms, 1)
+            stats["oracle_total_tokens"] = metrics.oracle_metrics.total_tokens
+        if metrics.http_metrics.total_requests > 0:
+            stats["http_requests"] = metrics.http_metrics.total_requests
+            stats["http_avg_latency_ms"] = round(metrics.http_metrics.avg_latency_ms, 1)
+    
+    # Build data structure
+    data = {
+        "scan_id": scan_id,
+        "timestamp": timestamp,
+        "target": report.target_name,
+        "statistics": stats,
+        "by_category": report.by_category(),
+        "results": [
+            {
+                "attack_id": r.attack_id,
+                "success": r.success,
+                "confidence": r.confidence,
+                "evidence": r.evidence,
+                "latency_ms": getattr(r, "latency_ms", None),
+            }
+            for r in report.results
+        ],
+    }
+    
+    # Add errors if any
+    if errors:
+        data["errors"] = [
+            {
+                "attack_id": r.attack_id,
+                "evidence": r.evidence,
+            }
+            for r in errors
+        ]
+    
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")

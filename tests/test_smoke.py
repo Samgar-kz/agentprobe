@@ -1,4 +1,8 @@
-"""End-to-end smoke test — verifies the scanner finds the bugs we planted in DummyVulnerableAgent."""
+"""End-to-end smoke test — verifies the scanner finds the bugs we planted in DummyVulnerableAgent.
+
+This test should pass for both v0.1 and v0.2+ implementations.
+Version 0.2 may find slightly different attacks due to LLM oracle improvements.
+"""
 
 from agentprobe.adapters import DummyVulnerableAgent
 from agentprobe.engine import run_scan
