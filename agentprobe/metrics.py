@@ -10,8 +10,23 @@ Tracks:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Optional
+
+
+def wilson_ci(successes: int, n: int, z: float = 1.96) -> tuple[float, float, float]:
+    """Wilson score 95% CI for a binomial proportion — robust for small n.
+    
+    Returns: (point_estimate, lower_bound, upper_bound)
+    """
+    if n == 0:
+        return (0.0, 0.0, 0.0)
+    p = successes / n
+    denom = 1 + z * z / n
+    center = (p + z * z / (2 * n)) / denom
+    margin = (z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / denom
+    return (p, max(0.0, center - margin), min(1.0, center + margin))
 
 
 # Model pricing (per 1M tokens)
