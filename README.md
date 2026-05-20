@@ -24,7 +24,7 @@ Our testing on gpt-4o-mini and claude-haiku-4-5 reveals three things:
 
 ## Results: Defense Effectiveness
 
-**gpt-4o-mini** (baseline: 87% leak rate, 79-93% 95% Wilson CI)
+**gpt-4o-mini**
 
 | Defense | Leak Rate | 95% CI | N |
 |---------|-----------|--------|---|
