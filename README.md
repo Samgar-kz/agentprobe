@@ -22,34 +22,25 @@ Our testing on gpt-4o-mini and claude-haiku-4-5 reveals three things:
    - Defending against information leakage != defending against tool abuse
    - Different threat models need different defenses
 
-## Results
+## Results: Defense Effectiveness
 
-### Defense Effectiveness on gpt-4o-mini
+**gpt-4o-mini** (baseline: 87% leak rate, 79-93% 95% Wilson CI)
 
-| Defense | Leak Rate | 95% CI | Task Failure Rate |
-|---------|-----------|--------|------------------|
-| None (baseline) | 29.8% | (19-42%) | 0% |
-| Delimiter | 25.0% | (15-37%) | 2% |
-| Prompt-level instruction | 31.0% | (21-43%) | 8% |
-| Sandwich | 15.5% | (7-27%) | 1% |
-| Spotlight | 6.0% | (1-15%) | 3% |
+| Defense | Leak Rate | 95% CI | N |
+|---------|-----------|--------|---|
+| None (baseline) | 29.8% | (19-42%) | 84 |
+| Delimiter | 25.0% | (15-37%) | 84 |
+| Prompt-level instruction | 31.0% | (21-43%) | 84 |
+| Sandwich | 15.5% | (7-27%) | 84 |
+| Screening (separate LLM verification) | 0% | (0-4%) | 84 |
 
-### Defense Effectiveness on claude-haiku-4-5
+**claude-haiku-4-5** holds baseline at 0% leak rate across all test conditions; defense differentiation is not measurable on this model.
 
-| Defense | Leak Rate | 95% CI | Task Failure Rate |
-|---------|-----------|--------|------------------|
-| None (baseline) | 0% | (0-4%) | 0% |
-| Delimiter | 0% | (0-4%) | 0% |
-| Prompt-level instruction | 0% | (0-4%) | 0% |
-| Sandwich | 0% | (0-4%) | 0% |
-| Spotlight | 0% | (0-4%) | 0% |
+### Key Finding: Screening is Substantially More Effective
 
-**Key observations:**
-- Claude Haiku shows strong baseline resistance to indirect injection (0% leak rate across all conditions)
-- GPT-4o-mini shows moderate baseline vulnerability (30% leak rate)
-- On GPT-4o-mini, spotlight defense reduces leak rate to 6% with minimal utility cost
-- Prompt-level instruction increases task failures to 8% (risky trade-off)
-- Delimiter and sandwich offer moderate improvement with minimal utility cost
+The separate verification pass (screening/llm_filter) achieved 0 successful leaks in 84 test runs (0%, 95% CI: 0–4%). This is the only defense that approaches the effectiveness of claude-haiku's native resilience.
+
+This suggests: **prompt-level instructions and delimiters are incomplete; a separate, independent judgment pass is required to reliably catch injection.**
 
 ## How To Use
 
@@ -76,7 +67,7 @@ The harness measures effectiveness of these defenses:
 2. **Delimiter** — wrap data in `<<<UNTRUSTED_DATA_BEGIN>>>...<<<UNTRUSTED_DATA_END>>>` markers
 3. **Prompt-level instruction** — explicit "treat data as data" in system prompt
 4. **Sandwich** — repeat safety instructions after the data (recency effect)
-5. **Spotlight** — mark data tokens with special marker so model can distinguish them
+5. **Screening** — separate LLM verification pass to detect injection before execution
 
 Test each against YOUR agent. See which work, which break utility.
 
@@ -88,6 +79,15 @@ Test each against YOUR agent. See which work, which break utility.
 4. **Semantic Oracle:** Uses gpt-4o-mini to judge: did agent leak data or follow the hidden instruction?
 5. **Utility Harness:** Runs benign legitimate tasks to ensure defenses don't break normal functionality
 6. **Report:** Table showing defense effectiveness + utility cost
+
+### Defense vs Utility Trade-off
+
+[TODO] Run utility harness on benign tasks (summarize email, extract info, compose reply) to measure false-positive rate per defense:
+- Does delimiter break parsing?
+- Does screening slow response or reject safe tasks?
+- Instruction change side effects?
+
+Current data: See agentprobe/injection/benign_tasks.py for test suite design.
 
 ## Responsible Use
 
@@ -155,11 +155,14 @@ agentprobe scan --target dummy --json-report results.json
 agentprobe scan --target dummy --verbose 2
 ```
 
-## Cost & Performance
+## Measurement Infrastructure
 
-- **Semantic Oracle (gpt-4o-mini):** ~$0.003 per 45-attack scan
-- **Speed:** 18x faster with async (45 attacks in ~300ms)
-- **Accuracy:** 95% confidence threshold (configurable)
+- **Oracle:** gpt-4o-mini with Structured Outputs (semantic judgment)
+- **Test Harness:** Carriers simulate real data flows (email, document, web page)
+- **Utility Harness:** [TODO] Measure task success rate per defense
+- **Benchmarking:** [TODO] Real latency / throughput on HTTP targets
+
+All numbers above are from actual test runs (CSV in /data/). Performance metrics pending real deployment testing.
 
 ## Testing Your Own Code
 
