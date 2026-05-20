@@ -15,12 +15,14 @@ Usage:
 
 from __future__ import annotations
 
+__all__ = ["judge", "get_semantic_oracle", "REFUSAL_MARKERS"]
+
 import os
 from typing import Literal, Optional
 
 from agentprobe.attacks.base import Attack, AttackResult
 from agentprobe.models import OracleResult
-from agentprobe.oracle_legacy import judge_legacy
+from agentprobe.oracle_legacy import judge_legacy, REFUSAL_MARKERS
 from agentprobe.target import AgentResponse
 
 # Global oracle instance (lazy-loaded)

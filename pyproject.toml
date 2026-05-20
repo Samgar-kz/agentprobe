@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agentprobe"
 version = "0.2.0"
-description = "Security scanner for LLM agents — finds prompt injection, tool abuse, and context leaks. Now with LLM-based semantic judgment and async parallel scanning."
+description = "Harness for measuring LLM agent resistance to indirect prompt injection and comparing defense effectiveness."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
