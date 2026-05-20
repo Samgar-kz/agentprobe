@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentprobe"
+version = "0.1.0"
+description = "Security scanner for LLM agents — finds prompt injection, tool abuse, and context leaks"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Your Name" }]
+keywords = ["llm", "security", "prompt-injection", "ai-safety", "agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Information Technology",
+    "Topic :: Security",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "httpx>=0.27",
+    "pydantic>=2.5",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.30"]
+dev = ["pytest>=7.4", "pytest-asyncio>=0.23", "ruff>=0.4"]
+
+[project.scripts]
+agentprobe = "agentprobe.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/agentprobe"
+Issues = "https://github.com/yourusername/agentprobe/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agentprobe"]
