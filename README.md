@@ -56,10 +56,15 @@ This suggests: **prompt-level instructions and delimiters are incomplete; either
 
 ### Test Your Own Agent
 
-> **Note:** Not yet on PyPI. Install from source until v0.2.0 release lands.
+> **Note:** The PyPI package is named `agentprobe-injection` (the plain
+> `agentprobe` name was already taken). The import package and CLI command are
+> still `agentprobe`.
 
 ```bash
-# Install from GitHub
+# Install from PyPI
+pip install agentprobe-injection
+
+# Or install the latest from GitHub
 pip install git+https://github.com/Samgar-kz/agentprobe.git
 
 # Or clone for development

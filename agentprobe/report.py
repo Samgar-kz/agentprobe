@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Any
 from uuid import uuid4
@@ -118,7 +118,7 @@ def write_json(
     }
     """
     scan_id = scan_id or str(uuid4())
-    timestamp = datetime.utcnow().isoformat() + "Z"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
     
     # Separate hits, misses, and errors
     errors = [r for r in report.results if not r.success and r.confidence == 0.0]

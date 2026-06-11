@@ -222,7 +222,7 @@ class TestAsyncConcurrency:
         # Run sync (for reference)
         from agentprobe.engine import run_scan
         start = time.time()
-        sync_report = run_scan(target, attacks=attacks)
+        sync_report, _ = run_scan(target, attacks=attacks)
         sync_time = time.time() - start
 
         # Both should complete

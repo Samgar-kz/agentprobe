@@ -10,7 +10,7 @@ from agentprobe.engine import run_scan
 
 def test_scan_finds_vulnerabilities():
     target = DummyVulnerableAgent()
-    report = run_scan(target)
+    report, _ = run_scan(target)
 
     assert report.total > 30, "expected at least 30 attacks in the catalogue"
 
@@ -30,7 +30,7 @@ def test_scan_finds_vulnerabilities():
 
 def test_by_category_breakdown():
     target = DummyVulnerableAgent()
-    report = run_scan(target)
+    report, _ = run_scan(target)
     breakdown = report.by_category()
 
     for cat in ("pragmatic", "register", "discourse", "codeswitch", "classic"):

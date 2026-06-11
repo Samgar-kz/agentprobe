@@ -12,14 +12,14 @@ class TestScanExecution:
     def test_scan_runs_successfully(self):
         """Scan should complete without errors."""
         target = DummyVulnerableAgent()
-        report = run_scan(target)
+        report, _ = run_scan(target)
         assert report is not None
         assert isinstance(report, ScanReport)
 
     def test_scan_produces_results(self):
         """Scan should produce result list."""
         target = DummyVulnerableAgent()
-        report = run_scan(target)
+        report, _ = run_scan(target)
         assert report.results is not None
         assert isinstance(report.results, list)
         assert len(report.results) > 0
@@ -27,27 +27,27 @@ class TestScanExecution:
     def test_scan_covers_all_attacks(self):
         """By default, scan should run all attacks."""
         target = DummyVulnerableAgent()
-        report = run_scan(target)
+        report, _ = run_scan(target)
         # Should have significant number of attacks
         assert report.total >= 30
 
     def test_scan_with_category_filter(self):
         """Scan should respect category filter."""
         target = DummyVulnerableAgent()
-        report = run_scan(target, categories={"pragmatic"})
+        report, _ = run_scan(target, categories={"pragmatic"})
         
         # All results should be pragmatic
         for result in report.results:
             assert result.attack_id.startswith("pragmatic.")
         
         # Should be fewer than total
-        all_report = run_scan(target)
+        all_report, _ = run_scan(target)
         assert report.total < all_report.total
 
     def test_scan_with_multiple_category_filters(self):
         """Scan should handle multiple category filters."""
         target = DummyVulnerableAgent()
-        report = run_scan(target, categories={"pragmatic", "register"})
+        report, _ = run_scan(target, categories={"pragmatic", "register"})
         
         # All results should be in one of these categories
         for result in report.results:
@@ -62,7 +62,7 @@ class TestScanExecution:
         def callback(idx, total, attack):
             calls.append((idx, total, attack.id))
 
-        report = run_scan(target, progress_callback=callback)
+        report, _ = run_scan(target, progress_callback=callback)
         
         assert len(calls) > 0, "progress callback was not called"
         # Check callback was called in order
@@ -77,7 +77,8 @@ class TestScanReport:
     def sample_report(self):
         """Create a sample report for testing."""
         target = DummyVulnerableAgent()
-        return run_scan(target)
+        report, _ = run_scan(target)
+        return report
 
     def test_report_target_name(self, sample_report):
         """Report should record target name."""
@@ -129,7 +130,7 @@ class TestScanWithCustomAttacks:
     def test_scan_with_empty_attacks_list(self):
         """Scan with empty attacks list should produce empty report."""
         target = DummyVulnerableAgent()
-        report = run_scan(target, attacks=[])
+        report, _ = run_scan(target, attacks=[])
         assert report.total == 0
         assert len(report.hits) == 0
 
@@ -144,7 +145,7 @@ class TestScanWithCustomAttacks:
             payload="test payload",
             success_signals=["NOMATCH"],
         )
-        report = run_scan(target, attacks=[attack])
+        report, _ = run_scan(target, attacks=[attack])
         assert report.total == 1
         assert len(report.results) == 1
         assert report.results[0].attack_id == "test.single"
@@ -157,15 +158,15 @@ class TestScanEdgeCases:
         """Target.reset() should be called between attacks."""
         # This is tested implicitly by DummyVulnerableAgent behavior
         target = DummyVulnerableAgent()
-        report1 = run_scan(target)
-        report2 = run_scan(target)
+        report1, _ = run_scan(target)
+        report2, _ = run_scan(target)
         # Both scans should work correctly (reset handled properly)
         assert report1.total == report2.total
 
     def test_scan_result_has_required_fields(self):
         """Each result should have all required fields."""
         target = DummyVulnerableAgent()
-        report = run_scan(target)
+        report, _ = run_scan(target)
         
         for result in report.results:
             assert result.attack_id
@@ -181,7 +182,7 @@ class TestScanEdgeCases:
         
         target = DummyVulnerableAgent()
         attacks = all_attacks()
-        report = run_scan(target, attacks=attacks[:5])
+        report, _ = run_scan(target, attacks=attacks[:5])
         
         for i, result in enumerate(report.results):
             assert result.attack_id == attacks[i].id

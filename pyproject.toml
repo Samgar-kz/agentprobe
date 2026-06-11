@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentprobe"
+name = "agentprobe-injection"
 version = "0.2.0a1"
 description = "Harness for measuring LLM agent resistance to indirect prompt injection and comparing defense effectiveness."
 readme = "README.md"

@@ -31,10 +31,10 @@ jobs:
           pip install -e ".[dev,openai]"
 
       - name: Run pytest
-        env:
-          # Tests should not hit live providers; set dummy keys so imports succeed.
-          OPENAI_API_KEY: "sk-test-dummy-key-for-ci-only"
-          ANTHROPIC_API_KEY: "sk-test-dummy-key-for-ci-only"
+        # No API keys are set on purpose. Without OPENAI_API_KEY the semantic
+        # oracle is unavailable and judge()/run_scan() fall back to the offline
+        # legacy oracle, so the suite runs fully offline and deterministically.
+        # Live-LLM behavior is covered by mocked tests (test_oracle_semantic.py).
         run: |
           pytest tests/ -v --tb=short
 
