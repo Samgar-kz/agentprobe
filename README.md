@@ -1,5 +1,10 @@
 # AgentProbe: Defense Evaluation Harness for LLM Agents
 
+[![CI](https://github.com/Samgar-kz/agentprobe/actions/workflows/ci.yml/badge.svg)](https://github.com/Samgar-kz/agentprobe/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)]()
+
 ## What This Is
 
 A testing framework for measuring your LLM agent's **resistance to indirect prompt injection** and **comparing defense effectiveness**. Tests your own systems or those you have permission to test.
@@ -46,8 +51,16 @@ This suggests: **prompt-level instructions and delimiters are incomplete; a sepa
 
 ### Test Your Own Agent
 
+> **Note:** Not yet on PyPI. Install from source until v0.2.0 release lands.
+
 ```bash
-pip install agentprobe
+# Install from GitHub
+pip install git+https://github.com/Samgar-kz/agentprobe.git
+
+# Or clone for development
+git clone https://github.com/Samgar-kz/agentprobe.git
+cd agentprobe && pip install -e .
+
 export OPENAI_API_KEY="..."
 
 agentprobe scan \
@@ -168,10 +181,10 @@ agentprobe scan --target dummy --verbose 2
 
 - **Oracle:** gpt-4o-mini with Structured Outputs (semantic judgment)
 - **Test Harness:** Carriers simulate real data flows (email, document, web page)
-- **Utility Harness:** [TODO] Measure task success rate per defense
-- **Benchmarking:** [TODO] Real latency / throughput on HTTP targets
+- **Utility Harness:** Measures task success rate per defense on benign tasks (see *Defense vs Utility Trade-off* above)
+- **Benchmarking:** Latency / throughput available via `--async --concurrency N` on HTTP targets
 
-All numbers above are from actual test runs (CSV in /data/). Performance metrics pending real deployment testing.
+All numbers above are from actual test runs (CSV in /data/).
 
 ## Testing Your Own Code
 
@@ -191,10 +204,11 @@ agentprobe scan --target dummy --async --concurrency 15
 
 ## What's NOT Included
 
-- Evasion techniques or obfuscation (intentionally)
-- Multi-language or advanced linguistic manipulations (they don't work on modern models)
+- Evasion techniques or obfuscation tooling (intentionally)
 - Zero-day exploits or novel vulnerabilities
-- Anything designed to be portable across different systems
+- Portable bypass payloads designed to be transferable across different systems
+
+**Note on linguistic transforms:** The harness *does* include pragmatic, register, discourse and code-switching (ru-en) categories — but as **measurement probes**, not as attack tooling. Our data shows surface-level linguistic transforms have ~0% success on modern frontier models, which is itself a useful finding for defenders deciding where to invest.
 
 This is a **defensive measurement tool**, not an offensive toolkit.
 
