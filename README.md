@@ -31,21 +31,26 @@ Our testing on gpt-4o-mini and claude-haiku-4-5 reveals three things:
 
 **gpt-4o-mini**
 
-| Defense | Leak Rate | 95% CI | N |
-|---------|-----------|--------|---|
-| None (baseline) | 29.8% | (19-42%) | 84 |
-| Delimiter | 25.0% | (15-37%) | 84 |
-| Prompt-level instruction | 31.0% | (21-43%) | 84 |
-| Sandwich | 15.5% | (7-27%) | 84 |
-| Screening (separate LLM verification) | 0% | (0-4%) | 84 |
+Defense names below match the `defense` column in the CSV outputs (`data/`) and JSON reports.
+
+| Defense (code name) | Leak Rate | N |
+|---------------------|-----------|---|
+| `none` (baseline) | 29.8% | 84 |
+| `delimited` (delimiter wrap) | 25.0% | 84 |
+| `instr_hierarchy` (privilege-level instruction) | 31.0% | 84 |
+| `sandwich` (recency reinforcement) | 15.5% | 84 |
+| `spotlight` (datamarking) | 6.0% | 84 |
+| `llm_filter` (separate screening pass) | 0% | 84 |
+
+For reference, the same battery on **gpt-4o** leaks much less (baseline 10.7%, `delimited`/`llm_filter` 0%), and **claude-haiku-4-5** holds 0% across every defense — so absolute numbers are model-specific; treat them as relative defense rankings, not universal constants.
 
 **claude-haiku-4-5** holds baseline at 0% leak rate across all test conditions; defense differentiation is not measurable on this model.
 
-### Key Finding: Screening is Substantially More Effective
+### Key Finding: Screening (and datamarking) beat prompt-level defenses
 
-The separate verification pass (screening/llm_filter) achieved 0 successful leaks in 84 test runs (0%, 95% CI: 0–4%). This is the only defense that approaches the effectiveness of claude-haiku's native resilience.
+The separate verification pass (`llm_filter`) achieved 0 successful leaks in 84 test runs on gpt-4o-mini. The next best is `spotlight` (datamarking) at 6.0%. By contrast, prompt-level instruction (`instr_hierarchy`, 31.0%) was *no better than baseline* (29.8%).
 
-This suggests: **prompt-level instructions and delimiters are incomplete; a separate, independent judgment pass is required to reliably catch injection.**
+This suggests: **prompt-level instructions and delimiters are incomplete; either token-level datamarking or a separate, independent judgment pass is required to reliably catch injection.**
 
 ## How To Use
 
@@ -76,11 +81,12 @@ cat results.json | jq '.statistics'
 
 The harness measures effectiveness of these defenses:
 
-1. **None** — baseline (no defense applied)
-2. **Delimiter** — wrap data in `<<<UNTRUSTED_DATA_BEGIN>>>...<<<UNTRUSTED_DATA_END>>>` markers
-3. **Prompt-level instruction** — explicit "treat data as data" in system prompt
-4. **Sandwich** — repeat safety instructions after the data (recency effect)
-5. **Screening** — separate LLM verification pass to detect injection before execution
+1. **`none`** — baseline (no defense applied)
+2. **`delimited`** — wrap data in `<<<UNTRUSTED_DATA_BEGIN>>>...<<<UNTRUSTED_DATA_END>>>` markers
+3. **`spotlight`** — datamarking: mark every data token so the model separates data from instructions
+4. **`sandwich`** — repeat the do-not-obey rule after the data (recency effect)
+5. **`instr_hierarchy`** — tag data with an explicit low privilege level; assert system instructions outrank tool/data content
+6. **`llm_filter`** — separate LLM verification pass to detect/strip injection before execution
 
 Test each against YOUR agent. See which work, which break utility.
 
@@ -101,11 +107,12 @@ Tested on 8 benign tasks (extract dates, risks, budget, sentiment, action items,
 
 | Defense | False-Positive Rate | Status |
 |---------|-------------------|--------|
-| None | 0% | baseline |
-| Delimiter | 0% | safe to use |
-| Prompt-level instruction | 0% | safe to use |
-| Sandwich | 0% | safe to use |
-| Screening (LLM verification) | 0% | safe to use |
+| `none` | 0% | baseline |
+| `delimited` | 0% | safe to use |
+| `spotlight` | 0% | safe to use |
+| `sandwich` | 0% | safe to use |
+| `instr_hierarchy` | 0% | safe to use |
+| `llm_filter` | 0% | safe to use |
 
 Conclusion: **Defenses do not break legitimate agent functionality** (in current test suite). Task success rate remains 100% across all defenses, making the injection effectiveness/defense trade-off directly comparable (both measured under same utility constraints).
 
@@ -126,9 +133,9 @@ agentprobe/
 ├── oracle_legacy.py            # Fallback: substring matching
 ├── oracle.py                   # Oracle interface
 ├── adapters/
-│   ├── dummy.py               # Your own agent simulator
-│   ├── openai_fc.py           # Test OpenAI function-calling agents
-│   └── http.py                # Test any HTTP-accessible agent
+│   ├── dummy.py               # Built-in intentionally-vulnerable agent simulator
+│   ├── http.py                # Test any HTTP-accessible agent (sync)
+│   └── http_async.py          # Async HTTP adapter for concurrent scans
 ├── injection/
 │   ├── carriers.py            # Email, document, web page wrappers
 │   ├── defenses.py            # Defense mechanisms to evaluate

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentprobe"
-version = "0.2.0"
+version = "0.2.0a1"
 description = "Harness for measuring LLM agent resistance to indirect prompt injection and comparing defense effectiveness."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Samgar" }]
 keywords = ["llm", "security", "prompt-injection", "ai-safety", "agents"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Information Technology",
     "Intended Audience :: Developers",
     "Topic :: Security",
