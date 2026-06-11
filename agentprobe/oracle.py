@@ -138,6 +138,9 @@ def judge(
                 payload=attack.payload,
                 response_text=_truncate_text(text),
                 raw_response=response.raw,
+                oracle_model=oracle_result.model_used,
+                oracle_tokens=oracle_result.tokens_used,
+                oracle_latency_ms=oracle_result.latency_ms,
             )
             return result
 

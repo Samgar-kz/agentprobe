@@ -26,6 +26,12 @@ class AttackResult:
     response_text: str           # what agent returned (truncated)
     raw_response: dict[str, Any] = field(default_factory=dict)
 
+    # Oracle telemetry (populated when an LLM-based oracle is used; 0/None for
+    # the offline legacy oracle). Used by the engine to aggregate cost metrics.
+    oracle_model: str | None = None
+    oracle_tokens: int = 0
+    oracle_latency_ms: float = 0.0
+
 
 @dataclass
 class Attack:

@@ -119,6 +119,14 @@ def run_scan(
                     metrics.misses += 1
                 else:
                     metrics.errors += 1
+
+            # Aggregate oracle (LLM) call cost/latency. Only LLM-based oracles
+            # populate oracle_tokens/model; the offline legacy oracle reports 0.
+            if result.oracle_model and result.oracle_model != "legacy":
+                metrics.oracle_metrics.total_calls += 1
+                metrics.oracle_metrics.total_tokens += result.oracle_tokens
+                metrics.oracle_metrics.total_latency_ms += result.oracle_latency_ms
+                metrics.oracle_metrics.model = result.oracle_model
         
         # Log the attack result
         logger.debug(

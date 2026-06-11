@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+  schedule:
+    # Weekly live-LLM smoke run (Mondays 06:00 UTC). Only the live job uses this;
+    # it no-ops gracefully if the OPENAI_API_KEY secret is not configured.
+    - cron: "0 6 * * 1"
 
 jobs:
   test:
@@ -30,13 +34,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,openai]"
 
-      - name: Run pytest
+      - name: Run pytest (offline)
         # No API keys are set on purpose. Without OPENAI_API_KEY the semantic
         # oracle is unavailable and judge()/run_scan() fall back to the offline
         # legacy oracle, so the suite runs fully offline and deterministically.
-        # Live-LLM behavior is covered by mocked tests (test_oracle_semantic.py).
+        # `live_llm`-marked tests auto-skip without a real key (see conftest.py);
+        # -m "not live_llm" makes that explicit and keeps this job free + fast.
         run: |
-          pytest tests/ -v --tb=short
+          pytest tests/ -v --tb=short -m "not live_llm"
 
   lint:
     runs-on: ubuntu-latest
@@ -56,3 +61,35 @@ jobs:
       - name: Run ruff check
         run: ruff check agentprobe/ tests/ || echo "::warning::Lint warnings present"
         continue-on-error: true
+
+  live:
+    # Real LLM integration tests. Runs only on manual dispatch or the weekly
+    # schedule, and only if the OPENAI_API_KEY secret is configured. Never
+    # blocks PRs and never runs without a key, so it can't turn the badge red
+    # for forks/contributors.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package + dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,openai]"
+
+      - name: Run live LLM tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::notice::OPENAI_API_KEY secret not set; skipping live LLM tests."
+            exit 0
+          fi
+          pytest tests/ -v --tb=short -m live_llm

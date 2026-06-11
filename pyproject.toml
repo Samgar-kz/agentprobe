@@ -45,5 +45,10 @@ agentprobe = "agentprobe.cli:app"
 Homepage = "https://github.com/Samgar-kz/agentprobe"
 Issues = "https://github.com/Samgar-kz/agentprobe/issues"
 
+[tool.pytest.ini_options]
+markers = [
+    "live_llm: test makes real LLM API calls; skipped without a real OPENAI_API_KEY (run with `pytest -m live_llm`).",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["agentprobe"]
