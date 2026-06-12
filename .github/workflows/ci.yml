@@ -32,7 +32,7 @@ jobs:
       - name: Install package + dev extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,openai]"
+          pip install -e ".[dev]"
 
       - name: Run pytest (offline)
         # No API keys are set on purpose. Without OPENAI_API_KEY the semantic
@@ -42,6 +42,12 @@ jobs:
         # -m "not live_llm" makes that explicit and keeps this job free + fast.
         run: |
           pytest tests/ -v --tb=short -m "not live_llm"
+
+      - name: Verify README results tables match data/ (no fabricated numbers)
+        # Enforces CONTRIBUTING's "no fabricated results" rule: every number in
+        # the README must trace to a committed CSV. Fails if the tables drift.
+        run: |
+          python scripts/gen_results_tables.py --check
 
   lint:
     runs-on: ubuntu-latest
@@ -82,7 +88,7 @@ jobs:
       - name: Install package + dev extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,openai]"
+          pip install -e ".[dev]"
 
       - name: Run live LLM tests
         env:

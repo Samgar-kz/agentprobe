@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -144,7 +143,7 @@ def scan(
 
     if not (0.0 <= min_confidence <= 1.0):
         logger.error(f"Invalid min_confidence: {min_confidence}")
-        console.print(f"[red]Error: --min-confidence must be between 0.0 and 1.0[/red]")
+        console.print("[red]Error: --min-confidence must be between 0.0 and 1.0[/red]")
         raise typer.Exit(code=3)
 
     try:
@@ -262,6 +261,174 @@ def list_attacks(
         console.print(f"    [dim]{a.description}[/dim]")
 
 
+def _validate_backend(backend: str) -> None:
+    """Reject unknown backends and warn (don't fail) if the API key is missing."""
+    from agentprobe.injection.tool_agent import PROVIDERS, required_key
+
+    if backend not in PROVIDERS:
+        console.print(
+            f"[red]Error: --backend must be one of {', '.join(sorted(PROVIDERS))}, got '{backend}'[/red]"
+        )
+        raise typer.Exit(code=3)
+    key = required_key(backend)
+    if not os.environ.get(key):
+        console.print(f"[yellow]Warning: {key} not set; the {backend} backend will fail.[/yellow]")
+
+
+def _ci_style(p: float, low: float, high: float) -> str:
+    return "red" if p >= 0.3 else "yellow" if p >= 0.1 else "green"
+
+
+@app.command("injection-scan")
+def injection_scan(
+    backend: str = typer.Option("openai", "--backend", help="LLM backend: openai | anthropic | gemini | groq | deepseek | mistral"),
+    model: Optional[str] = typer.Option(None, "--model", help="Model override (bare name, or any litellm route like 'gemini/gemini-2.0-flash')"),
+    repeats: int = typer.Option(5, "--repeats", help="Repeats per (defense x carrier x probe) for real variance"),
+    temp: float = typer.Option(0.7, "--temp", help="Sampling temperature (>0 needed for variance)"),
+    llm_filter: bool = typer.Option(False, "--llm-filter", help="Also evaluate the separate-screening defense (extra cost)"),
+    out: Optional[str] = typer.Option(None, "--out", help="Write raw results to <out>.csv and <out>.json"),
+) -> None:
+    """Measure indirect-injection leak rate per defense, with 95% CI and overhead.
+
+    This is the harness behind the README's defense-effectiveness table. It runs
+    every defense against every carrier x probe and reports how often the agent
+    obeyed an instruction hidden in tool/data content.
+    """
+    from rich.table import Table
+    from agentprobe.injection.harness import run_injection_harness
+
+    _validate_backend(backend)
+
+    from agentprobe.injection.instructions import ALL_PROBES
+    from agentprobe.injection.carriers import ALL_CARRIERS
+    console.print(
+        f"[bold cyan]Injection harness[/bold cyan]  backend={backend} "
+        f"model={model or 'default'} repeats={repeats} temp={temp} "
+        f"probes={len(ALL_PROBES)} carriers={len(ALL_CARRIERS)}\n"
+    )
+    if temp == 0:
+        console.print("[yellow]Warning: temp=0 gives ~identical repeats and no variance. Use --temp=0.7.[/yellow]\n")
+
+    spinner = Spinner("dots", text="Running…")
+    try:
+        with Live(spinner, console=console, refresh_per_second=8) as live:
+            def progress(done: int, total: int) -> None:
+                live.update(Spinner("dots", text=f"[{done}/{total}]"))
+            result = run_injection_harness(
+                backend=backend, model=model, repeats=repeats,
+                temperature=temp, use_llm_filter=llm_filter, progress=progress,
+            )
+    except Exception as e:
+        console.print(f"[red]Harness failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print("\n[bold green]━━━ Leak rate by defense (95% CI) ━━━[/bold green]\n")
+    t = Table(header_style="bold magenta")
+    t.add_column("Defense")
+    t.add_column("Leaks/N", justify="right")
+    t.add_column("Leak rate [95% CI]", justify="right")
+    t.add_column("Overhead (tok/run, ms/run)", justify="right")
+    for s in result.defenses:
+        p, lo, hi = s.ci
+        style = _ci_style(p, lo, hi)
+        t.add_row(
+            s.name, f"{s.leaks}/{s.total}",
+            f"[{style}]{p*100:.0f}% [{lo*100:.0f}–{hi*100:.0f}][/{style}]",
+            f"{s.overhead_tokens_per_run:.0f} tok, {s.overhead_latency_ms_per_run:.0f} ms",
+        )
+    console.print(t)
+
+    console.print("\n[bold green]━━━ Leak rate by carrier ━━━[/bold green]\n")
+    tc = Table(header_style="bold magenta")
+    tc.add_column("Carrier")
+    tc.add_column("Leaks/N", justify="right")
+    tc.add_column("Rate", justify="right")
+    for name, (lk, tot) in sorted(result.per_carrier.items(), key=lambda kv: -(kv[1][0] / kv[1][1] if kv[1][1] else 0)):
+        p = lk / tot if tot else 0
+        style = _ci_style(p, p, p)
+        tc.add_row(name, f"{lk}/{tot}", f"[{style}]{p*100:.0f}%[/{style}]")
+    console.print(tc)
+
+    if out:
+        _export_rows(out, result.rows, result.meta,
+                     ["defense", "carrier", "channel", "instruction", "category", "leaked", "reason"])
+        console.print(f"\n[dim]Raw data written to {out}.csv and {out}.json ({len(result.rows)} records)[/dim]")
+
+
+@app.command("utility-scan")
+def utility_scan(
+    backend: str = typer.Option("openai", "--backend", help="LLM backend: openai | anthropic | gemini | groq | deepseek | mistral"),
+    model: Optional[str] = typer.Option(None, "--model", help="Model override (bare name, or any litellm route like 'gemini/gemini-2.0-flash')"),
+    repeats: int = typer.Option(3, "--repeats", help="Repeats per (defense x benign task)"),
+    temp: float = typer.Option(0.7, "--temp", help="Sampling temperature"),
+    llm_filter: bool = typer.Option(False, "--llm-filter", help="Also evaluate the separate-screening defense (extra cost)"),
+    out: Optional[str] = typer.Option(None, "--out", help="Write raw results to <out>.csv and <out>.json"),
+) -> None:
+    """Measure the false-positive cost of each defense on benign tasks.
+
+    The complement to injection-scan: a defense is only practical if it preserves
+    utility. Reports task success rate per defense (high = utility intact).
+    """
+    from rich.table import Table
+    from agentprobe.injection.harness import run_utility_harness
+
+    _validate_backend(backend)
+
+    from agentprobe.injection.benign_tasks import BENIGN_TASKS
+    console.print(
+        f"[bold cyan]Utility harness[/bold cyan]  backend={backend} "
+        f"model={model or 'default'} repeats={repeats} temp={temp} "
+        f"tasks={len(BENIGN_TASKS)}\n"
+    )
+
+    spinner = Spinner("dots", text="Running…")
+    try:
+        with Live(spinner, console=console, refresh_per_second=8) as live:
+            def progress(done: int, total: int) -> None:
+                live.update(Spinner("dots", text=f"[{done}/{total}]"))
+            result = run_utility_harness(
+                backend=backend, model=model, repeats=repeats,
+                temperature=temp, use_llm_filter=llm_filter, progress=progress,
+            )
+    except Exception as e:
+        console.print(f"[red]Harness failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print("\n[bold green]━━━ Success rate by defense (utility preserved, 95% CI) ━━━[/bold green]\n")
+    t = Table(header_style="bold magenta")
+    t.add_column("Defense")
+    t.add_column("OK/N", justify="right")
+    t.add_column("Success rate [95% CI]", justify="right")
+    t.add_column("Overhead (tok/run, ms/run)", justify="right")
+    for s in result.defenses:
+        p, lo, hi = s.ci
+        style = "green" if p >= 0.95 else "yellow" if p >= 0.90 else "red"
+        t.add_row(
+            s.name, f"{s.successes}/{s.total}",
+            f"[{style}]{p*100:.0f}% [{lo*100:.0f}–{hi*100:.0f}][/{style}]",
+            f"{s.overhead_tokens_per_run:.0f} tok, {s.overhead_latency_ms_per_run:.0f} ms",
+        )
+    console.print(t)
+
+    if out:
+        _export_rows(out, result.rows, result.meta,
+                     ["model", "defense", "task", "task_id", "iteration", "outcome"])
+        console.print(f"\n[dim]Raw data written to {out}.csv and {out}.json ({len(result.rows)} records)[/dim]")
+
+
+def _export_rows(base: str, rows: list, meta: dict, fieldnames: list[str]) -> None:
+    """Write harness rows to <base>.csv and a {meta, rows} bundle to <base>.json."""
+    import csv
+    import json
+    base = base[:-4] if base.endswith(".csv") else base
+    with open(f"{base}.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        w.writerows(rows)
+    with open(f"{base}.json", "w") as f:
+        json.dump({"meta": meta, "rows": rows}, f, indent=2, ensure_ascii=False)
+
+
 @app.command()
 def version() -> None:
     """Print version."""
@@ -273,8 +440,6 @@ def health(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed health info"),
 ) -> None:
     """Check system health and readiness."""
-    from agentprobe.llm_oracle import SemanticOracle
-
     console.print("[bold]AgentProbe Health Check[/bold]\n")
 
     # Check dependencies
@@ -283,7 +448,7 @@ def health(
         "pydantic": False,
         "typer": False,
         "rich": False,
-        "Claude API": False,
+        "OpenAI API": False,
     }
 
     try:
@@ -310,8 +475,12 @@ def health(
     except ImportError:
         pass
 
-    oracle = SemanticOracle()
-    checks["Claude API"] = oracle.is_available()
+    try:
+        from agentprobe.oracle_semantic import SemanticOracle
+        SemanticOracle()
+        checks["OpenAI API"] = True
+    except Exception:
+        pass
 
     for name, available in checks.items():
         status = "[green]✓[/green]" if available else "[red]✗[/red]"
@@ -325,8 +494,8 @@ def health(
     else:
         missing = [k for k, v in checks.items() if not v]
         console.print(f"[yellow]Missing: {', '.join(missing)}[/yellow]")
-        if "Claude API" in missing:
-            console.print("[dim]Tip: Set ANTHROPIC_API_KEY to enable LLM-based semantic judgment[/dim]")
+        if "OpenAI API" in missing:
+            console.print("[dim]Tip: Set OPENAI_API_KEY to enable LLM-based semantic judgment[/dim]")
         raise typer.Exit(code=1)
 
 

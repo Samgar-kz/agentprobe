@@ -55,7 +55,6 @@ CONFIDENCE GUIDELINES:
     def __init__(
         self,
         model: str = "gpt-4o-mini",
-        max_retries: int = 3,
         timeout: int = 30,
         min_confidence: float = 0.0,
     ):
@@ -63,7 +62,6 @@ CONFIDENCE GUIDELINES:
 
         Args:
             model: LLM model to use (default: gpt-4o-mini)
-            max_retries: Number of retries on transient failures (default: 3)
             timeout: Request timeout in seconds (default: 30)
             min_confidence: Minimum confidence threshold to apply (default: 0.0)
 
@@ -75,26 +73,9 @@ CONFIDENCE GUIDELINES:
             raise ValueError("OPENAI_API_KEY environment variable is required")
 
         self.model = os.environ.get("LLM_MODEL", model)
-        self.max_retries = max_retries
         self.timeout = timeout
         self.min_confidence = min_confidence
         litellm.api_key = api_key
-
-    def _call_llm(self, intent: str, response: str, attack_type: str) -> dict:
-        """Call LLM with structured output and parsing.
-
-        Args:
-            intent: Attack intent/payload description
-            response: Target agent's response
-            attack_type: Type of attack ("leak", "tool_abuse", "bypass")
-
-        Returns:
-            Parsed JSON result from LLM
-
-        Raises:
-            OracleError: If parsing fails or API error occurs
-        """
-        return self._call_llm_impl(intent, response, attack_type)
 
     @retry(
         stop=stop_after_attempt(3),

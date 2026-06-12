@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass
@@ -23,6 +23,8 @@ class AgentResponse:
     text: str
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
+    # HTTP status code for transport-backed targets; None for in-process agents.
+    status_code: Optional[int] = None
 
 
 class Target(ABC):

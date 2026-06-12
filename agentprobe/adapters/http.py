@@ -50,7 +50,9 @@ class HTTPAgent(Target):
 
         tool_calls = data.get("tool_calls", []) or []
 
-        return AgentResponse(text=text, tool_calls=tool_calls, raw=data)
+        return AgentResponse(
+            text=text, tool_calls=tool_calls, raw=data, status_code=resp.status_code
+        )
 
     def describe(self) -> dict[str, Any]:
         return {"name": self.name, "endpoint": self.endpoint, "tools": []}

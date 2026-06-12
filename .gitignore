@@ -9,6 +9,11 @@ dist/
 .venv/
 venv/
 .env
-*.json
-!pyproject.toml
 .DS_Store
+
+# Scan outputs are written to the repo root; committed datasets live under data/.
+/*.json
+!data/**
+# CSVs (+ the labeled jsonl) are the data of record; the bulky per-run JSON dumps
+# just duplicate the rows, so keep them out of the repo.
+data/*.json

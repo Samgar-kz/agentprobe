@@ -83,7 +83,7 @@ class AsyncHTTPAgent(Target):
         # Exponential backoff retry loop for 429 responses
         for attempt in range(self.max_retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=self.timeout, proxies=self.proxy) as client:
+                async with httpx.AsyncClient(timeout=self.timeout, proxy=self.proxy) as client:
                     resp = await client.request(
                         self.method, self.endpoint, headers=self.headers, json=payload
                     )
@@ -99,8 +99,9 @@ class AsyncHTTPAgent(Target):
                                 text="",
                                 tool_calls=[],
                                 raw={"error": "Rate limited after retries", "status": 429},
+                                status_code=429,
                             )
-                    
+
                     resp.raise_for_status()
                     data = resp.json()
 
@@ -110,7 +111,9 @@ class AsyncHTTPAgent(Target):
 
                     tool_calls = data.get("tool_calls", []) or []
 
-                    return AgentResponse(text=text, tool_calls=tool_calls, raw=data)
+                    return AgentResponse(
+                        text=text, tool_calls=tool_calls, raw=data, status_code=resp.status_code
+                    )
                     
             except asyncio.TimeoutError:
                 return AgentResponse(
@@ -123,6 +126,7 @@ class AsyncHTTPAgent(Target):
                     text="",
                     tool_calls=[],
                     raw={"error": str(e), "status": e.response.status_code},
+                    status_code=e.response.status_code,
                 )
             except Exception as e:
                 # Graceful degradation for any other error
@@ -210,6 +214,7 @@ class AsyncHTTPAgent(Target):
                     text="",
                     tool_calls=[],
                     raw={"error": str(e), "status": e.response.status_code},
+                    status_code=e.response.status_code,
                 )
             except Exception as e:
                 return AgentResponse(

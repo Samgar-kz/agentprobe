@@ -101,7 +101,7 @@ def run_scan(
         if metrics:
             metrics.http_metrics.total_requests += 1
             metrics.http_metrics.total_latency_ms += http_latency_ms
-            if hasattr(response, "status_code"):
+            if response.status_code is not None:
                 status = response.status_code
                 metrics.http_metrics.status_codes[status] = metrics.http_metrics.status_codes.get(status, 0) + 1
         

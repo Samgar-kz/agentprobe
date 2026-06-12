@@ -249,7 +249,7 @@ class TestModelPricing:
         required_models = [
             "gpt-4o-mini",
             "gpt-4o",
-            "claude-3-haiku",
+            "claude-haiku-4-5",
             "gemini-1.5-flash",
         ]
         
@@ -261,7 +261,7 @@ class TestModelPricing:
         """Test that pricing values are reasonable."""
         assert MODEL_PRICING["gpt-4o-mini"] == 0.15
         assert MODEL_PRICING["gpt-4o"] == 5.0
-        assert MODEL_PRICING["claude-3-haiku"] == 0.80
+        assert MODEL_PRICING["claude-haiku-4-5"] == 1.00
         assert MODEL_PRICING["gemini-1.5-flash"] == 0.075
 
 

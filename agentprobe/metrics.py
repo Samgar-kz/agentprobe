@@ -12,7 +12,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Optional
+
+from agentprobe.logging_config import get_logger
+
+logger = get_logger("metrics")
+
+# Fallback price (USD per 1M tokens) used when a model is absent from
+# MODEL_PRICING. Matches gpt-4o-mini, the default oracle model.
+_DEFAULT_PRICE_PER_1M = 0.15
 
 
 def wilson_ci(successes: int, n: int, z: float = 1.96) -> tuple[float, float, float]:
@@ -29,12 +36,19 @@ def wilson_ci(successes: int, n: int, z: float = 1.96) -> tuple[float, float, fl
     return (p, max(0.0, center - margin), min(1.0, center + margin))
 
 
-# Model pricing (per 1M tokens)
+# Model pricing (USD per 1M input tokens). Approximate; used only for the
+# cost estimate in scan metrics. Keys are matched against the model id reported
+# by the oracle/agent; unknown models fall back to _DEFAULT_PRICE_PER_1M.
 MODEL_PRICING = {
-    "gpt-4o-mini": 0.15,       # $0.15 per 1M input tokens
-    "gpt-4o": 5.0,              # $5 per 1M input tokens
-    "claude-3-haiku": 0.80,     # $0.80 per 1M input tokens
-    "gemini-1.5-flash": 0.075,  # $0.075 per 1M input tokens
+    "gpt-4o-mini": 0.15,
+    "gpt-4o": 5.0,
+    "claude-haiku-4-5": 1.00,
+    "gemini-2.5-flash": 0.30,
+    "gemini-2.0-flash": 0.10,
+    "gemini-1.5-flash": 0.075,
+    "llama-3.3-70b-versatile": 0.59,   # Groq
+    "deepseek-chat": 0.27,
+    "mistral-small-latest": 0.20,
 }
 
 
@@ -57,7 +71,15 @@ class OracleMetrics:
     @property
     def cost_usd(self) -> float:
         """Estimated cost in USD based on tokens and model pricing."""
-        price_per_1m = MODEL_PRICING.get(self.model, 0.15)  # default: gpt-4o-mini
+        price_per_1m = MODEL_PRICING.get(self.model)
+        if price_per_1m is None:
+            logger.warning(
+                "No pricing for model %r; estimating at the default $%.2f/1M tokens. "
+                "Add it to MODEL_PRICING for an accurate cost.",
+                self.model,
+                _DEFAULT_PRICE_PER_1M,
+            )
+            price_per_1m = _DEFAULT_PRICE_PER_1M
         return (self.total_tokens / 1_000_000) * price_per_1m
 
 
