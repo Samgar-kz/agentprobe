@@ -49,6 +49,25 @@ jobs:
         run: |
           python scripts/gen_results_tables.py --check
 
+  action-selftest:
+    # Dogfood the composite Action: run it against the bundled dummy target.
+    # The dummy is a vulnerable fixture so it never gates; this just proves the
+    # action.yml + scripts/ci_outputs.py wiring works end-to-end on every push.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run AgentProbe action (dummy, offline)
+        id: probe
+        uses: ./
+
+      - name: Show action outputs
+        run: |
+          echo "outcome=${{ steps.probe.outputs.outcome }}"
+          echo "hits=${{ steps.probe.outputs.hits }} / total=${{ steps.probe.outputs.total }}"
+          test -f "${{ steps.probe.outputs.report-path }}"
+
   lint:
     runs-on: ubuntu-latest
     steps:

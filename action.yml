@@ -1,0 +1,164 @@
+name: "AgentProbe Injection Scan"
+description: "Gate your CI on an LLM agent's resistance to indirect prompt injection."
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  target:
+    description: "Target type: dummy | http | http_async. 'dummy' runs offline as a self-test."
+    required: false
+    default: "dummy"
+  endpoint:
+    description: "Agent endpoint URL. Required when target is http/http_async."
+    required: false
+    default: ""
+  input-field:
+    description: "JSON request field carrying the user message (http target)."
+    required: false
+    default: "message"
+  output-field:
+    description: "JSON response field carrying the agent reply (http target)."
+    required: false
+    default: "reply"
+  auth-header:
+    description: "Authorization header value. Pass a secret, e.g. ${{ secrets.AGENT_TOKEN }}."
+    required: false
+    default: ""
+  oracle:
+    description: "Judge: legacy (offline substring, no API key) | semantic (gpt-4o-mini, needs OPENAI_API_KEY env)."
+    required: false
+    default: "legacy"
+  min-confidence:
+    description: "Minimum oracle confidence to count a hit (semantic oracle only), 0.0-1.0."
+    required: false
+    default: "0.7"
+  fail-threshold:
+    description: "Fail the build if hit rate exceeds this fraction (0.0 = fail on any hit)."
+    required: false
+    default: "0.0"
+  categories:
+    description: "Comma-separated attack categories to run (empty = all)."
+    required: false
+    default: ""
+  concurrency:
+    description: "Max concurrent connections for async http scans."
+    required: false
+    default: "15"
+  use-async:
+    description: "Use the async engine for http targets (true/false)."
+    required: false
+    default: "false"
+  json-report:
+    description: "Path to write the JSON report (always produced)."
+    required: false
+    default: "agentprobe-report.json"
+  soft-fail:
+    description: "If true, report findings but never fail the build (monitor mode)."
+    required: false
+    default: "false"
+  extra-args:
+    description: "Extra raw flags appended to `agentprobe scan` (escape hatch)."
+    required: false
+    default: ""
+  python-version:
+    description: "Python version to set up."
+    required: false
+    default: "3.12"
+
+outputs:
+  outcome:
+    description: "pass | fail | error"
+    value: ${{ steps.scan.outputs.outcome }}
+  hits:
+    description: "Number of successful attacks."
+    value: ${{ steps.scan.outputs.hits }}
+  total:
+    description: "Total attacks run."
+    value: ${{ steps.scan.outputs.total }}
+  success-rate:
+    description: "Hit rate as a fraction (0.0-1.0)."
+    value: ${{ steps.scan.outputs.success-rate }}
+  report-path:
+    description: "Path to the JSON report."
+    value: ${{ steps.scan.outputs.report-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install AgentProbe
+      shell: bash
+      run: python -m pip install --upgrade pip "$GITHUB_ACTION_PATH"
+
+    - name: Run injection scan
+      id: scan
+      shell: bash
+      env:
+        AP_TARGET: ${{ inputs.target }}
+        AP_ENDPOINT: ${{ inputs.endpoint }}
+        AP_INPUT_FIELD: ${{ inputs.input-field }}
+        AP_OUTPUT_FIELD: ${{ inputs.output-field }}
+        AP_AUTH_HEADER: ${{ inputs.auth-header }}
+        AP_ORACLE: ${{ inputs.oracle }}
+        AP_MIN_CONFIDENCE: ${{ inputs.min-confidence }}
+        AP_FAIL_THRESHOLD: ${{ inputs.fail-threshold }}
+        AP_CATEGORIES: ${{ inputs.categories }}
+        AP_CONCURRENCY: ${{ inputs.concurrency }}
+        AP_USE_ASYNC: ${{ inputs.use-async }}
+        AP_JSON_REPORT: ${{ inputs.json-report }}
+        AP_SOFT_FAIL: ${{ inputs.soft-fail }}
+        AP_EXTRA_ARGS: ${{ inputs.extra-args }}
+      run: |
+        set -uo pipefail
+
+        # Validate http targets need an endpoint.
+        if { [ "$AP_TARGET" = "http" ] || [ "$AP_TARGET" = "http_async" ]; } && [ -z "$AP_ENDPOINT" ]; then
+          echo "::error::endpoint is required when target=$AP_TARGET"
+          exit 3
+        fi
+
+        ARGS=( scan
+          --target "$AP_TARGET"
+          --oracle "$AP_ORACLE"
+          --min-confidence "$AP_MIN_CONFIDENCE"
+          --fail-threshold "$AP_FAIL_THRESHOLD"
+          --concurrency "$AP_CONCURRENCY"
+          --json-report "$AP_JSON_REPORT"
+        )
+        [ -n "$AP_ENDPOINT" ]     && ARGS+=( --endpoint "$AP_ENDPOINT" )
+        [ -n "$AP_INPUT_FIELD" ]  && ARGS+=( --input-field "$AP_INPUT_FIELD" )
+        [ -n "$AP_OUTPUT_FIELD" ] && ARGS+=( --output-field "$AP_OUTPUT_FIELD" )
+        [ -n "$AP_AUTH_HEADER" ]  && ARGS+=( --auth-header "$AP_AUTH_HEADER" )
+        [ -n "$AP_CATEGORIES" ]   && ARGS+=( --categories "$AP_CATEGORIES" )
+        [ "$AP_USE_ASYNC" = "true" ] && ARGS+=( --async )
+        # Intentional word-split so multiple extra flags are passed separately.
+        # shellcheck disable=SC2206
+        [ -n "$AP_EXTRA_ARGS" ]   && ARGS+=( $AP_EXTRA_ARGS )
+
+        echo "+ agentprobe ${ARGS[*]}"
+        agentprobe "${ARGS[@]}"
+        RC=$?
+        echo "scan exit code: $RC"
+
+        python3 "$GITHUB_ACTION_PATH/scripts/ci_outputs.py" "$AP_JSON_REPORT" "$RC"
+
+        # The bundled dummy is an intentionally-vulnerable fixture; gating on it
+        # is meaningless, so it never fails the build (zero-config self-test stays
+        # green). Point target at your real agent to actually gate.
+        if [ "$AP_TARGET" = "dummy" ]; then
+          echo "::notice::target=dummy is a built-in vulnerable fixture — reporting only, not gating. Set target=http with your endpoint to gate the build."
+          exit 0
+        fi
+
+        if [ "$AP_SOFT_FAIL" = "true" ]; then
+          if [ "$RC" -ne 0 ]; then
+            echo "::warning::scan exit code $RC, but soft-fail is enabled — not failing the build."
+          fi
+          exit 0
+        fi
+        exit "$RC"

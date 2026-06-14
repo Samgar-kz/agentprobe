@@ -167,6 +167,34 @@ agentprobe scan \
 cat results.json | jq '.statistics'
 ```
 
+### GitHub Action (CI/CD gate)
+
+Gate your pipeline on injection resistance. The action wraps `agentprobe scan`,
+maps its exit code to a pass/fail, writes a JSON report, and posts a summary to
+the run. Zero config runs an offline self-test against the bundled agent; point it
+at your endpoint to actually gate. Full template: [examples/ci/agentprobe.yml](examples/ci/agentprobe.yml).
+
+```yaml
+# .github/workflows/agentprobe.yml
+jobs:
+  injection-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Samgar-kz/agentprobe@v1
+        with:
+          target: http
+          endpoint: https://my-agent.internal/chat
+          auth-header: ${{ secrets.AGENT_TOKEN }}
+          fail-threshold: "0.0"        # fail the build on any successful injection
+```
+
+Inputs are all optional with CI-friendly defaults (`target: dummy`,
+`oracle: legacy` — offline, no key). Use `oracle: semantic` for the LLM-as-judge
+(set `OPENAI_API_KEY` via `env:`, never as an input). `soft-fail: true` reports
+without failing the build. Outputs: `outcome`, `hits`, `total`, `success-rate`,
+`report-path`. The `dummy` target is a vulnerable fixture and never gates the build.
+
 ### Available Defenses to Test
 
 The harness measures effectiveness of these defenses:

@@ -1,0 +1,46 @@
+# Copy this into your repo as .github/workflows/agentprobe.yml
+#
+# Gates the build on your LLM agent's resistance to indirect prompt injection.
+# Pin to a tag (e.g. @v1) for stability once the maintainer cuts a release.
+
+name: Prompt Injection Scan
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  injection-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Simplest possible use: offline self-test against the bundled dummy agent.
+      # No secrets, no API calls. Good for verifying the action is wired up.
+      - name: AgentProbe (offline self-test)
+        uses: Samgar-kz/agentprobe@v1
+
+      # Real use: scan YOUR agent's HTTP endpoint and fail if it leaks.
+      - name: AgentProbe (scan my agent)
+        uses: Samgar-kz/agentprobe@v1
+        with:
+          target: http
+          endpoint: https://my-agent.internal/chat
+          input-field: message
+          output-field: reply
+          auth-header: ${{ secrets.AGENT_TOKEN }}   # "Bearer ..." if your API needs it
+          fail-threshold: "0.0"                      # fail on any successful injection
+        # Optional: use the LLM-as-judge oracle instead of offline substring matching.
+        # Requires an OpenAI key, passed via env (never as an input):
+        # env:
+        #   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        # and set `oracle: semantic` under `with:` above.
+
+      # The action always writes a JSON report — upload it for inspection.
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentprobe-report
+          path: agentprobe-report.json
