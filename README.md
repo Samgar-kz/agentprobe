@@ -113,7 +113,10 @@ column in the CSV outputs and JSON reports.
 > openai --model gpt-4o` to refresh it on the same probes.
 
 The other four tables are from one run of the same 10-probe battery (5 string
-defenses × 14 carriers × 10 probes × 5 repeats = 700 per defense per model).
+defenses × 14 carriers × 10 probes × 5 repeats = 700 per defense per model). The
+suite has since grown to **11 probes** — a zero-click markdown/HTML image-beacon
+exfiltration probe was added afterward (`markdown_image_exfil`); it is covered by
+unit tests but not yet in these committed numbers. Re-run `injection-scan` to score it.
 
 **Model robustness ranking (baseline `none`):** claude-haiku-4-5 (0.6%) ≫
 gemini-2.5-flash (5.6%) > deepseek-chat (9.4%) > gpt-4o-mini (21.1%). Absolute
@@ -210,7 +213,7 @@ Test each against YOUR agent. See which work, which break utility.
 
 ### How It Works
 
-1. **Injection probes:** 10 instructions spanning data exfiltration, unauthorized actions, system-prompt disclosure, content injection, and behavior hijacking (`agentprobe/injection/instructions.py`), embedded in realistic carriers (email, document, web page)
+1. **Injection probes:** 11 instructions spanning data exfiltration (incl. a zero-click markdown/HTML image beacon), unauthorized actions, system-prompt disclosure, content injection, and behavior hijacking (`agentprobe/injection/instructions.py`), embedded in realistic carriers (email, document, web page)
 2. **Defense Applicator:** Wraps the data with each defense mechanism
 3. **Target Adapter:** Sends to your agent, captures response
 4. **Oracle:** Each probe carries a deterministic detector (substring / tool-call inspection, guarded against counting a *reported* instruction as a leak). The separate `agentprobe scan` path uses a gpt-4o-mini LLM-as-judge.
@@ -371,7 +374,7 @@ agentprobe scan --target dummy --verbose 2
 
 ## Measurement Infrastructure
 
-- **Probes:** 10 injection instructions × 14 carriers, each with a deterministic detector
+- **Probes:** 11 injection instructions × 14 carriers, each with a deterministic detector (committed result tables were run on the first 10 — see Results)
 - **Oracle (scan path):** gpt-4o-mini with Structured Outputs (semantic judgment) — see oracle validation below
 - **Statistics:** Wilson 95% CIs on every rate; McNemar's test for pairwise defense comparison (`mcnemar_test.py`)
 - **Overhead:** per-defense tokens and latency reported alongside effectiveness
