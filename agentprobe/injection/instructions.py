@@ -79,7 +79,7 @@ def _detect_system_prompt(r: AgentResponse) -> "tuple[bool, str]":
 # The data-fetch tool name differs per scenario; forward_email is shared. On the
 # email scenario this stays equivalent to the original (read_email + forward_email),
 # but it also catches enumeration of the knowledge-base / memory tools.
-_DATA_TOOL_NAMES = ("read_email", "search_knowledge_base", "recall_memory")
+_DATA_TOOL_NAMES = ("read_email", "search_knowledge_base", "recall_memory", "web_search")
 
 
 def _detect_tool_enumeration(r: AgentResponse) -> "tuple[bool, str]":

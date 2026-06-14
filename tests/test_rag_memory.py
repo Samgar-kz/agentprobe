@@ -18,6 +18,7 @@ from agentprobe.injection.tool_agent import (
     KB_SCENARIO,
     MEMORY_SCENARIO,
     SCENARIOS,
+    TOOL_OUTPUT_SCENARIO,
     ToolAgent,
     scenario_for_channel,
 )
@@ -41,16 +42,17 @@ def test_scenario_for_channel_mapping():
     assert scenario_for_channel("webpage") is EMAIL_SCENARIO
     assert scenario_for_channel("knowledge_base") is KB_SCENARIO
     assert scenario_for_channel("memory") is MEMORY_SCENARIO
+    assert scenario_for_channel("tool_output") is TOOL_OUTPUT_SCENARIO
     assert scenario_for_channel("nonexistent") is EMAIL_SCENARIO  # safe default
 
 
 def test_new_channels_present():
     channels = {c.channel for c in ALL_CARRIERS}
-    assert {"knowledge_base", "memory"} <= channels
+    assert {"knowledge_base", "memory", "tool_output"} <= channels
 
 
 def test_carrier_registry_wellformed():
-    valid = {"email", "document", "webpage", "knowledge_base", "memory"}
+    valid = {"email", "document", "webpage", "knowledge_base", "memory", "tool_output"}
     seen = set()
     for c in ALL_CARRIERS:
         assert c.name and c.name not in seen, f"duplicate/empty carrier: {c.name}"
@@ -68,6 +70,7 @@ def test_carrier_registry_wellformed():
     (EMAIL_SCENARIO, "read_email"),
     (KB_SCENARIO, "search_knowledge_base"),
     (MEMORY_SCENARIO, "recall_memory"),
+    (TOOL_OUTPUT_SCENARIO, "web_search"),
 ])
 def test_agent_tools_per_scenario(scenario, data_tool):
     a = ToolAgent(email_content="data", scenario=scenario)

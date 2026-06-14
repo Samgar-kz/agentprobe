@@ -159,12 +159,15 @@ column in the CSV outputs and JSON reports.
 The other four tables are from one run of the same 10-probe battery (5 string
 defenses × 14 carriers × 10 probes × 5 repeats = 700 per defense per model). The
 battery has since grown — both **11 probes** (a zero-click markdown/HTML
-image-beacon, `markdown_image_exfil`) and **19 carriers**: the new
-`knowledge_base` (RAG / retrieval poisoning) and `memory` (memory poisoning)
-channels deliver the same probes through a retrieved knowledge-base chunk or a
-recalled memory note — content that carries *implied trust*, unlike an inbox
-email. These additions are covered by unit tests but are **not** in the committed
-numbers above; re-run `injection-scan` to score them.
+image-beacon, `markdown_image_exfil`) and **21 carriers** across three new
+channels: `knowledge_base` (RAG / retrieval poisoning), `memory` (memory
+poisoning), and `tool_output` (poisoned web-search / API results). They deliver
+the same probes through content that carries *implied trust* — a retrieved chunk,
+a recalled memory note, a tool result — unlike an inbox email. These additions
+are covered by unit tests but are **not** in the committed numbers above; re-run
+`injection-scan` to score them. The one finding scored so far (gpt-4o-mini,
+repeats=2): memory poisoning leaks significantly more than inbox email (see Key
+Findings #3 and the Evidence section).
 
 **Model robustness ranking (baseline `none`):** claude-haiku-4-5 (0.6%) ≫
 gemini-2.5-flash (5.6%) > deepseek-chat (9.4%) > gpt-4o-mini (21.1%). Absolute
@@ -304,6 +307,13 @@ merges on "no injection regression". Works on `scan`, `injection-scan`, and
 `utility-scan` reports; choose the grouping with `--by`
 (probe/defense/carrier/category), or `--soft-fail` to report without gating.
 
+For more than two points, `agentprobe trend scan_001.json scan_002.json
+scan_003.json …` tracks the rate across an ordered series, testing each step
+against the previous one and flagging only statistically significant moves
+(same exit-code contract). This is the regression-tracking loop — run, commit the
+report, repeat, and `trend` shows whether your agent is drifting worse over time
+without standing up a dashboard.
+
 ### Available Defenses to Test
 
 The harness measures effectiveness of these defenses:
@@ -319,7 +329,7 @@ Test each against YOUR agent. See which work, which break utility.
 
 ### How It Works
 
-1. **Injection probes:** 11 instructions spanning data exfiltration (incl. a zero-click markdown/HTML image beacon), unauthorized actions, system-prompt disclosure, content injection, and behavior hijacking (`agentprobe/injection/instructions.py`), embedded in realistic carriers across five channels — email, document, web page, knowledge base (RAG / retrieval poisoning), and long-term memory (memory poisoning). The knowledge-base and memory channels route to dedicated agent scenarios (`search_knowledge_base` / `recall_memory` tools) so the probe arrives as *trusted retrieved context*, not as an external message.
+1. **Injection probes:** 11 instructions spanning data exfiltration (incl. a zero-click markdown/HTML image beacon), unauthorized actions, system-prompt disclosure, content injection, and behavior hijacking (`agentprobe/injection/instructions.py`), embedded in realistic carriers across six channels — email, document, web page, knowledge base (RAG / retrieval poisoning), long-term memory (memory poisoning), and tool output (poisoned search/API results). The knowledge-base, memory, and tool-output channels route to dedicated agent scenarios (`search_knowledge_base` / `recall_memory` / `web_search` tools) so the probe arrives as *trusted retrieved context or a tool result*, not as an external message.
 2. **Defense Applicator:** Wraps the data with each defense mechanism
 3. **Target Adapter:** Sends to your agent, captures response
 4. **Oracle:** Each probe carries a deterministic detector (substring / tool-call inspection, guarded against counting a *reported* instruction as a leak). The separate `agentprobe scan` path uses a gpt-4o-mini LLM-as-judge.
@@ -484,7 +494,8 @@ agentprobe scan --target dummy --verbose 2
 
 ## Measurement Infrastructure
 
-- **Probes:** 11 injection instructions × 19 carriers across 5 channels (email, document, webpage, knowledge_base, memory), each with a deterministic detector (committed result tables were run on the first 10 probes × 14 carriers — see Results)
+- **Probes:** 11 injection instructions × 21 carriers across 6 channels (email, document, webpage, knowledge_base, memory, tool_output), each with a deterministic detector (committed result tables were run on the first 10 probes × 14 carriers — see Results)
+- **Oracle (injection-scan):** `--oracle deterministic` (default, free, exact), `--oracle hybrid` (detector precision + LLM recall), or `--oracle semantic` (LLM only) — unified `Oracle` interface in `agentprobe/oracle_base.py`
 - **Oracle (scan path):** gpt-4o-mini with Structured Outputs (semantic judgment) — see oracle validation below
 - **Statistics:** Wilson 95% CIs on every rate; McNemar's test for pairwise defense comparison (`mcnemar_test.py`)
 - **Overhead:** per-defense tokens and latency reported alongside effectiveness

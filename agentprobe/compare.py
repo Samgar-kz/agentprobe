@@ -270,3 +270,58 @@ def compare(
         old_label=old.label, new_label=new.label,
         overall=overall, groups=deltas,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Trend (regression tracking over an ordered series of reports)
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class TrendPoint:
+    label: str
+    pos: int
+    n: int
+    p_value: float | None        # two-proportion vs the previous point (None for the first)
+    status: str                  # baseline | improved | regressed | flat
+
+    @property
+    def rate(self) -> float:
+        return self.pos / self.n if self.n else 0.0
+
+
+@dataclass
+class TrendResult:
+    kind: str
+    metric_name: str
+    lower_is_better: bool
+    points: list[TrendPoint]
+
+    @property
+    def has_regression(self) -> bool:
+        return any(p.status == "regressed" for p in self.points)
+
+
+def trend(paths: list[str | Path], by: str | None = None) -> TrendResult:
+    """Track the overall metric across an ordered series of reports.
+
+    Each step is compared to the previous one with the same significance test as
+    `compare`, so a step is only called improved/regressed when the change is real.
+    """
+    if len(paths) < 2:
+        raise ValueError("trend needs at least two reports")
+    reports = [normalize(load_report(p), by=by) for p in paths]
+    kinds = {r.kind for r in reports}
+    if len(kinds) > 1:
+        raise ValueError(f"cannot trend across mixed report kinds: {sorted(kinds)}")
+
+    points: list[TrendPoint] = []
+    prev: tuple[int, int] | None = None
+    for path, r in zip(paths, reports):
+        pos, n = r.overall
+        if prev is None:
+            status, pv = "baseline", None
+        else:
+            status, pv = _classify(prev, (pos, n), r.lower_is_better)
+        points.append(TrendPoint(label=Path(path).name, pos=pos, n=n, p_value=pv, status=status))
+        prev = (pos, n)
+    return TrendResult(reports[0].kind, reports[0].metric_name, reports[0].lower_is_better, points)

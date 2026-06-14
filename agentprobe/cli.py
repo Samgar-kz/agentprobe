@@ -360,6 +360,55 @@ def compare_cmd(
     raise typer.Exit(code=2 if result.has_regression else 0)
 
 
+@app.command("trend")
+def trend_cmd(
+    reports: list[str] = typer.Argument(..., help="Two or more report JSONs, in chronological order"),
+    by: Optional[str] = typer.Option(None, "--by", help="Group dimension for normalization (the overall metric is shown)"),
+    soft_fail: bool = typer.Option(False, "--soft-fail", help="Report only; always exit 0"),
+) -> None:
+    """Track the leak/hit rate across a series of reports, flagging real regressions.
+
+    Like `compare`, but over N reports in chronological order: each step is tested
+    against the previous one, so only statistically significant moves are called
+    improved/regressed. Exit code: 0 = no regression, 2 = a step regressed, 1 = error.
+    """
+    from rich.table import Table
+
+    from agentprobe.compare import trend as run_trend
+
+    try:
+        res = run_trend(reports, by=by)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error: file not found: {e.filename}[/red]")
+        raise typer.Exit(code=1)
+    except (ValueError, KeyError, json.JSONDecodeError) as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    direction = "lower is better" if res.lower_is_better else "higher is better"
+    console.print(f"\n[bold]{res.metric_name} trend[/bold]  [dim]({res.kind}, {direction})[/dim]\n")
+    t = Table(header_style="bold magenta")
+    t.add_column("Report")
+    t.add_column(res.metric_name, justify="right")
+    t.add_column("Δ vs prev", justify="right")
+    t.add_column("vs prev", justify="right")
+    _style = {"baseline": "dim", "improved": "green", "regressed": "red", "flat": "white"}
+    prev_rate = None
+    for p in res.points:
+        delta = "—" if prev_rate is None else f"{(p.rate - prev_rate) * 100:+.1f}pp"
+        sig = "—" if p.p_value is None else f"p={p.p_value:.3f} {'✓' if p.p_value < 0.05 else 'n.s.'}"
+        st = _style.get(p.status, "white")
+        t.add_row(p.label, f"{p.rate*100:.1f}% ({p.pos}/{p.n})", delta, f"[{st}]{p.status}[/{st}] {sig}")
+        prev_rate = p.rate
+    console.print(t)
+    verdict = "[bold red]REGRESSION[/bold red]" if res.has_regression else "[bold green]OK[/bold green]"
+    console.print(f"\n{verdict}\n")
+
+    if soft_fail:
+        raise typer.Exit(code=0)
+    raise typer.Exit(code=2 if res.has_regression else 0)
+
+
 @app.command("analyze")
 def analyze_cmd(
     csv_path: str = typer.Argument(..., help="Injection-scan CSV (e.g. data/gpt4omini.csv or rag_memory_scan.csv)"),
@@ -468,6 +517,7 @@ def injection_scan(
     repeats: int = typer.Option(5, "--repeats", help="Repeats per (defense x carrier x probe) for real variance"),
     temp: float = typer.Option(0.7, "--temp", help="Sampling temperature (>0 needed for variance)"),
     llm_filter: bool = typer.Option(False, "--llm-filter", help="Also evaluate the separate-screening defense (extra cost)"),
+    oracle: str = typer.Option("deterministic", "--oracle", help="Judge: deterministic (free, exact) | hybrid (detector + LLM recall) | semantic (LLM only). hybrid/semantic need OPENAI_API_KEY."),
     out: Optional[str] = typer.Option(None, "--out", help="Write raw results to <out>.csv and <out>.json"),
 ) -> None:
     """Measure indirect-injection leak rate per defense, with 95% CI and overhead.
@@ -478,14 +528,23 @@ def injection_scan(
     """
     from rich.table import Table
     from agentprobe.injection.harness import run_injection_harness
+    from agentprobe.oracle_base import get_oracle
 
     _validate_backend(backend)
+
+    try:
+        oracle_obj = get_oracle(oracle)
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(code=3)
+    if oracle in ("hybrid", "semantic") and not os.environ.get("OPENAI_API_KEY"):
+        console.print(f"[yellow]Warning: --oracle {oracle} makes LLM calls but OPENAI_API_KEY is not set.[/yellow]")
 
     from agentprobe.injection.instructions import ALL_PROBES
     from agentprobe.injection.carriers import ALL_CARRIERS
     console.print(
         f"[bold cyan]Injection harness[/bold cyan]  backend={backend} "
-        f"model={model or 'default'} repeats={repeats} temp={temp} "
+        f"model={model or 'default'} repeats={repeats} temp={temp} oracle={oracle} "
         f"probes={len(ALL_PROBES)} carriers={len(ALL_CARRIERS)}\n"
     )
     if temp == 0:
@@ -498,7 +557,7 @@ def injection_scan(
                 live.update(Spinner("dots", text=f"[{done}/{total}]"))
             result = run_injection_harness(
                 backend=backend, model=model, repeats=repeats,
-                temperature=temp, use_llm_filter=llm_filter, progress=progress,
+                temperature=temp, use_llm_filter=llm_filter, oracle=oracle_obj, progress=progress,
             )
     except Exception as e:
         console.print(f"[red]Harness failed: {e}[/red]")

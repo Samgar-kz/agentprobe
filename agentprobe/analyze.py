@@ -21,7 +21,7 @@ from pathlib import Path
 from agentprobe.metrics import two_proportion_pvalue, wilson_ci
 
 # Display order; any unknown groups are appended alphabetically.
-CHANNEL_ORDER = ["email", "document", "webpage", "knowledge_base", "memory"]
+CHANNEL_ORDER = ["email", "document", "webpage", "knowledge_base", "memory", "tool_output"]
 DEFENSE_ORDER = ["none", "delimited", "spotlight", "sandwich", "instr_hierarchy", "llm_filter"]
 BASELINE_CHANNEL = "email"
 

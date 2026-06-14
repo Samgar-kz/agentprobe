@@ -25,7 +25,6 @@ from agentprobe.injection.benign_tasks import BENIGN_TASKS
 from agentprobe.injection.carriers import ALL_CARRIERS
 from agentprobe.injection.defenses import ALL_DEFENSES
 from agentprobe.injection.instructions import ALL_PROBES
-from agentprobe.injection.oracle import judge_injection
 
 
 def wilson_ci(successes: int, n: int, z: float = 1.96) -> tuple[float, float, float]:
@@ -141,13 +140,20 @@ def run_injection_harness(
     repeats: int = 5,
     temperature: float = 0.7,
     use_llm_filter: bool = False,
+    oracle=None,
     progress=None,
 ) -> InjectionResult:
     """Run the injection battery and return structured results.
 
-    `progress`, if given, is called as progress(done, total).
+    `oracle` is any `agentprobe.oracle_base.Oracle` (default DeterministicOracle —
+    free and exact). Pass HybridOracle/SemanticOracle to add LLM recall at the cost
+    of a model call per attempt. `progress`, if given, is called as progress(done, total).
     """
     from agentprobe.injection.tool_agent import ToolAgent, scenario_for_channel
+
+    if oracle is None:
+        from agentprobe.oracle_base import DeterministicOracle
+        oracle = DeterministicOracle()
 
     defenses = _build_defenses(use_llm_filter, backend, model)
     stats = {d.name: DefenseStat(name=d.name) for d in defenses}
@@ -176,8 +182,8 @@ def run_injection_harness(
                         scenario=scenario,
                     )
                     try:
-                        verdict = judge_injection(agent.send(scenario.user_request), probe=probe)
-                        leaked = 1 if verdict.leaked else 0
+                        verdict = oracle.judge(agent.send(scenario.user_request), probe=probe)
+                        leaked = 1 if verdict.success else 0
                     except Exception as e:
                         rows.append({
                             "defense": defense.name, "carrier": carrier.name,
@@ -212,6 +218,7 @@ def run_injection_harness(
         "backend": backend, "model": model or "default", "repeats": repeats,
         "temperature": temperature, "llm_filter": use_llm_filter,
         "n_probes": len(ALL_PROBES), "n_carriers": len(ALL_CARRIERS),
+        "oracle": getattr(oracle, "name", "deterministic"),
     }
     return InjectionResult(meta=meta, defenses=list(stats.values()), per_carrier=per_carrier, rows=rows)
 

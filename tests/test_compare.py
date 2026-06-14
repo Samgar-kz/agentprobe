@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from agentprobe.compare import compare, detect_kind, normalize
+from agentprobe.compare import compare, detect_kind, normalize, trend
 from agentprobe.metrics import two_proportion_pvalue
 
 
@@ -240,3 +240,39 @@ def test_delta_pp_and_rates(tmp_path):
     assert res.overall.old_rate == pytest.approx(0.20)
     assert res.overall.new_rate == pytest.approx(0.05)
     assert res.overall.delta_pp == pytest.approx(-15.0)
+
+
+# --------------------------------------------------------------------------- #
+# trend (series over N reports)
+# --------------------------------------------------------------------------- #
+
+def test_trend_flags_step_regression(tmp_path):
+    a = _write(tmp_path, "a.json", inj_report(probe_rows("p1", 10, 400)))
+    b = _write(tmp_path, "b.json", inj_report(probe_rows("p1", 12, 400)))  # ~flat vs a
+    c = _write(tmp_path, "c.json", inj_report(probe_rows("p1", 60, 400)))  # jump vs b
+    res = trend([a, b, c])
+    statuses = [p.status for p in res.points]
+    assert statuses[0] == "baseline"
+    assert statuses[2] == "regressed"
+    assert res.has_regression is True
+
+
+def test_trend_improvement_no_regression(tmp_path):
+    a = _write(tmp_path, "a.json", inj_report(probe_rows("p1", 60, 400)))
+    b = _write(tmp_path, "b.json", inj_report(probe_rows("p1", 5, 400)))
+    res = trend([a, b])
+    assert res.points[1].status == "improved"
+    assert res.has_regression is False
+
+
+def test_trend_needs_two_reports(tmp_path):
+    a = _write(tmp_path, "a.json", inj_report(probe_rows("p1", 1, 10)))
+    with pytest.raises(ValueError):
+        trend([a])
+
+
+def test_trend_mixed_kinds_raise(tmp_path):
+    inj = _write(tmp_path, "i.json", inj_report(probe_rows("p", 1, 10)))
+    scan = _write(tmp_path, "s.json", scan_report())
+    with pytest.raises(ValueError):
+        trend([inj, scan])
