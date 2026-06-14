@@ -36,6 +36,27 @@ def wilson_ci(successes: int, n: int, z: float = 1.96) -> tuple[float, float, fl
     return (p, max(0.0, center - margin), min(1.0, center + margin))
 
 
+def two_proportion_pvalue(x1: int, n1: int, x2: int, n2: int) -> float:
+    """Two-sided p-value for the difference between two independent proportions.
+
+    Pooled two-proportion z-test, used by `agentprobe compare` to decide whether a
+    change between two scans is a real regression/improvement or just noise.
+    Dependency-free (normal CDF via math.erf — no scipy).
+
+    Returns 1.0 when the test is undefined (empty sample or zero variance).
+    """
+    if n1 == 0 or n2 == 0:
+        return 1.0
+    p1 = x1 / n1
+    p2 = x2 / n2
+    p_pool = (x1 + x2) / (n1 + n2)
+    var = p_pool * (1 - p_pool) * (1 / n1 + 1 / n2)
+    if var <= 0:
+        return 1.0
+    z = (p1 - p2) / math.sqrt(var)
+    return 2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(z) / math.sqrt(2.0))))
+
+
 # Model pricing (USD per 1M input tokens). Approximate; used only for the
 # cost estimate in scan metrics. Keys are matched against the model id reported
 # by the oracle/agent; unknown models fall back to _DEFAULT_PRICE_PER_1M.

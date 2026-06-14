@@ -11,9 +11,47 @@ A testing framework for measuring your LLM agent's **resistance to indirect prom
 
 NOT an attack generator or bypass toolkit. NOT for probing other people's systems.
 
+## Quickstart
+
+Run a full injection scan against the bundled vulnerable agent in ~30 seconds — no API key, fully offline:
+
+```bash
+pip install agentprobe-injection
+agentprobe scan --target dummy --oracle legacy
+```
+
+Example output (illustrative — `dummy` is an intentionally-vulnerable fixture; a hardened agent should score far lower):
+
+```
+╭──────── AgentProbe scan ────────╮
+│ Target:   dummy                 │
+│ Attacks:  45                    │
+│ Hits:     16 (36%)              │
+│ Duration: 2.1s                  │
+╰─────────────────────────────────╯
+
+Category          Hits / Total   Rate
+classic           6 / 12         50%
+pragmatic         4 / 11         36%
+register          3 / 11         27%
+...
+```
+
+Point it at your own agent over HTTP, or gate CI on the result:
+
+```bash
+agentprobe scan --target http --endpoint https://my-agent/chat --json-report results.json
+```
+
+**How results are judged.** The defense-effectiveness tables below come from **deterministic detectors** (substring + tool-call inspection, guarded so an injection the agent merely *reports* isn't counted as a leak) — they do **not** depend on an LLM's opinion. The separate `--oracle semantic` LLM-as-judge is independently validated against human labels at **87.5% agreement / Cohen's kappa 0.75** ([details](#oracle-validation)).
+
+### Why this matters
+
+Indirect prompt injection — instructions hidden in the *data* an agent reads (emails, documents, web pages, tool outputs) rather than typed by the user — slips past prompt-level defenses. AgentProbe measures how much your agent leaks under that pressure and which defenses actually reduce it. Full cross-model results are below.
+
 ## Key Findings from Our Research
 
-Our testing on gpt-4o-mini and claude-haiku-4-5 reveals two data-backed findings,
+Our testing on gpt-4o-mini and claude-haiku-4-5 reveals three data-backed findings,
 plus one observation that is *not* yet backed by a frontier-model run:
 
 1. **Indirect injection through data IS a real vulnerability**
@@ -26,7 +64,13 @@ plus one observation that is *not* yet backed by a frontier-model run:
    - Privilege tagging (`instr_hierarchy`) is consistently the weakest — at or near baseline
    - Absolute leak rates differ widely by model (haiku ≪ gemini < deepseek < gpt-4o-mini); treat them as relative rankings
 
-3. **(Not yet validated on frontier models) Surface-level linguistic transforms add little**
+3. **Memory poisoning is the most dangerous channel; RAG is not special**
+   - On gpt-4o-mini, an injection recalled from the agent's own long-term **memory** leaks significantly more than the same injection in an inbox email (28.6% vs 20.2%, two-proportion p=0.009)
+   - **RAG / retrieved knowledge-base** content is statistically indistinguishable from email (18.5%, p=0.53) — the "it's internal, so trust it" intuition did *not* raise leaks for retrieval
+   - **Framing within a channel dominates:** a memory entry phrased as a "standing user instruction" is the single worst carrier (38%), while a retrieved FAQ Q/A never leaked (0%)
+   - Single-model result (gpt-4o-mini, repeats=2, N=220–660/channel) from `rag_memory_scan.csv`; not yet replicated cross-model
+
+4. **(Not yet validated on frontier models) Surface-level linguistic transforms add little**
    - Pragmatic implicature, register shifts, and code-switching are included as
      *measurement probes* in `agentprobe/attacks/transforms.py`
    - So far they have only been exercised against the in-process simulator
@@ -114,9 +158,13 @@ column in the CSV outputs and JSON reports.
 
 The other four tables are from one run of the same 10-probe battery (5 string
 defenses × 14 carriers × 10 probes × 5 repeats = 700 per defense per model). The
-suite has since grown to **11 probes** — a zero-click markdown/HTML image-beacon
-exfiltration probe was added afterward (`markdown_image_exfil`); it is covered by
-unit tests but not yet in these committed numbers. Re-run `injection-scan` to score it.
+battery has since grown — both **11 probes** (a zero-click markdown/HTML
+image-beacon, `markdown_image_exfil`) and **19 carriers**: the new
+`knowledge_base` (RAG / retrieval poisoning) and `memory` (memory poisoning)
+channels deliver the same probes through a retrieved knowledge-base chunk or a
+recalled memory note — content that carries *implied trust*, unlike an inbox
+email. These additions are covered by unit tests but are **not** in the committed
+numbers above; re-run `injection-scan` to score them.
 
 **Model robustness ranking (baseline `none`):** claude-haiku-4-5 (0.6%) ≫
 gemini-2.5-flash (5.6%) > deepseek-chat (9.4%) > gpt-4o-mini (21.1%). Absolute
@@ -198,6 +246,38 @@ Inputs are all optional with CI-friendly defaults (`target: dummy`,
 without failing the build. Outputs: `outcome`, `hits`, `total`, `success-rate`,
 `report-path`. The `dummy` target is a vulnerable fixture and never gates the build.
 
+### Regression tracking
+
+A single scan is a snapshot; what a team actually needs is *did my agent get
+worse?* `agentprobe compare` diffs two report JSONs and flags only
+**statistically significant** changes (pooled two-proportion test, p<0.05) — a
+naive 7%→3% diff on a small sample is noise, and this won't cry wolf on it.
+
+```bash
+agentprobe injection-scan --out scan_001          # baseline — commit scan_001.json
+# ...later, after a prompt / model / tool change...
+agentprobe injection-scan --out scan_002
+agentprobe compare scan_001.json scan_002.json    # exit 2 if anything regressed
+```
+
+```
+Leak rate:  6.3% (101/1600) -> 3.5% (56/1600)   Δ -2.8pp   FAIL
+
+Improved (significant):
+  + markdown_image_exfil   12.5% -> 1.5%   Δ -11.0pp
+Regressed (significant):
+  - enumerate_tools         1.2% -> 7.5%   Δ +6.2pp  ⚠
+Within noise: 1 probe(s)
+```
+
+Note the verdict: the overall leak rate *dropped*, yet the run **FAILs** because
+one probe regressed — a net average can hide a per-probe regression. Exit codes
+match the GitHub Action contract (`0` clean, `2` regression, `1` error), so
+`agentprobe compare baseline.json "$NEW"` drops straight into a CI step to gate
+merges on "no injection regression". Works on `scan`, `injection-scan`, and
+`utility-scan` reports; choose the grouping with `--by`
+(probe/defense/carrier/category), or `--soft-fail` to report without gating.
+
 ### Available Defenses to Test
 
 The harness measures effectiveness of these defenses:
@@ -213,7 +293,7 @@ Test each against YOUR agent. See which work, which break utility.
 
 ### How It Works
 
-1. **Injection probes:** 11 instructions spanning data exfiltration (incl. a zero-click markdown/HTML image beacon), unauthorized actions, system-prompt disclosure, content injection, and behavior hijacking (`agentprobe/injection/instructions.py`), embedded in realistic carriers (email, document, web page)
+1. **Injection probes:** 11 instructions spanning data exfiltration (incl. a zero-click markdown/HTML image beacon), unauthorized actions, system-prompt disclosure, content injection, and behavior hijacking (`agentprobe/injection/instructions.py`), embedded in realistic carriers across five channels — email, document, web page, knowledge base (RAG / retrieval poisoning), and long-term memory (memory poisoning). The knowledge-base and memory channels route to dedicated agent scenarios (`search_knowledge_base` / `recall_memory` tools) so the probe arrives as *trusted retrieved context*, not as an external message.
 2. **Defense Applicator:** Wraps the data with each defense mechanism
 3. **Target Adapter:** Sends to your agent, captures response
 4. **Oracle:** Each probe carries a deterministic detector (substring / tool-call inspection, guarded against counting a *reported* instruction as a leak). The separate `agentprobe scan` path uses a gpt-4o-mini LLM-as-judge.
@@ -262,13 +342,13 @@ agentprobe/
 │   ├── http.py                # Test any HTTP-accessible agent (sync)
 │   └── http_async.py          # Async HTTP adapter for concurrent scans
 ├── injection/
-│   ├── carriers.py            # Email, document, web page wrappers
-│   ├── instructions.py        # Injection probes (10) + per-probe leak detectors
+│   ├── carriers.py            # Carriers: email, document, webpage, knowledge_base (RAG), memory
+│   ├── instructions.py        # Injection probes (11) + per-probe leak detectors
 │   ├── defenses.py            # Defense mechanisms to evaluate
 │   ├── screening.py           # Screening defense (separate LLM pass)
 │   ├── benign_tasks.py        # Utility harness tasks
 │   ├── oracle.py              # Deterministic injection oracle (probe-aware)
-│   ├── tool_agent.py          # Real LLM email agent under test (the target you own)
+│   ├── tool_agent.py          # Real LLM agent under test (email / knowledge-base / memory scenarios)
 │   └── harness.py             # Injection + utility harness engine (CI of the results)
 ├── engine.py                  # Synchronous scan
 ├── engine_async.py            # Async scan
@@ -374,7 +454,7 @@ agentprobe scan --target dummy --verbose 2
 
 ## Measurement Infrastructure
 
-- **Probes:** 11 injection instructions × 14 carriers, each with a deterministic detector (committed result tables were run on the first 10 — see Results)
+- **Probes:** 11 injection instructions × 19 carriers across 5 channels (email, document, webpage, knowledge_base, memory), each with a deterministic detector (committed result tables were run on the first 10 probes × 14 carriers — see Results)
 - **Oracle (scan path):** gpt-4o-mini with Structured Outputs (semantic judgment) — see oracle validation below
 - **Statistics:** Wilson 95% CIs on every rate; McNemar's test for pairwise defense comparison (`mcnemar_test.py`)
 - **Overhead:** per-defense tokens and latency reported alongside effectiveness
@@ -427,7 +507,7 @@ agentprobe scan --target dummy --async --concurrency 15
 - Zero-day exploits or novel vulnerabilities
 - Portable bypass payloads designed to be transferable across different systems
 
-**Note on linguistic transforms:** The harness *does* include pragmatic, register, discourse and code-switching (ru-en) categories — but as **measurement probes**, not as attack tooling. So far they have only been run against the in-process simulator, not a real model with a committed CSV, so we make no frontier-model claim about them yet (see Key Findings #3).
+**Note on linguistic transforms:** The harness *does* include pragmatic, register, discourse and code-switching (ru-en) categories — but as **measurement probes**, not as attack tooling. So far they have only been run against the in-process simulator, not a real model with a committed CSV, so we make no frontier-model claim about them yet (see Key Findings #4).
 
 This is a **defensive measurement tool**, not an offensive toolkit.
 

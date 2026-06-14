@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Optional
@@ -261,6 +262,103 @@ def list_attacks(
         console.print(f"    [dim]{a.description}[/dim]")
 
 
+def _fmt_cell(t: "tuple[int, int] | None") -> str:
+    if t is None:
+        return "—"
+    pos, n = t
+    r = pos / n if n else 0.0
+    return f"{r*100:.1f}% ({pos}/{n})"
+
+
+def _delta_pp_str(g) -> str:
+    dpp = g.delta_pp
+    return f"Δ {dpp:+.1f}pp" if dpp is not None else ""
+
+
+def _group_line(g) -> str:
+    return f"{g.name:<26} {_fmt_cell(g.old)} -> {_fmt_cell(g.new)}  {_delta_pp_str(g)}"
+
+
+def _render_comparison(result, old_path: str, new_path: str) -> None:
+    from rich.text import Text
+
+    direction = "lower is better" if result.lower_is_better else "higher is better"
+    console.print(
+        f"\n[bold]Comparing[/bold]  {result.old_label} [dim]({old_path})[/dim]"
+        f"  ->  {result.new_label} [dim]({new_path})[/dim]"
+    )
+    console.print(
+        f"[dim]Kind: {result.kind} ({direction}) · grouped by {result.group_dim}[/dim]\n"
+    )
+
+    o = result.overall
+    verdict = "[bold red]FAIL[/bold red]" if result.has_regression else "[bold green]PASS[/bold green]"
+    console.print(
+        f"[bold]{result.metric_name}:[/bold]  {_fmt_cell(o.old)} -> {_fmt_cell(o.new)}"
+        f"   {_delta_pp_str(o)}   {verdict}\n"
+    )
+
+    if result.improved:
+        console.print("[green]Improved (significant):[/green]")
+        for g in sorted(result.improved, key=lambda x: x.delta_pp or 0):
+            console.print(Text("  + ", style="green").append(_group_line(g), style="default"))
+    if result.regressed:
+        console.print("[red]Regressed (significant):[/red]")
+        for g in sorted(result.regressed, key=lambda x: -(x.delta_pp or 0)):
+            console.print(Text("  - ", style="red").append(_group_line(g) + "  ⚠", style="default"))
+    if result.flat:
+        console.print(f"[dim]Within noise: {len(result.flat)} {result.group_dim}(s)[/dim]")
+    if result.added or result.removed:
+        bits = []
+        if result.added:
+            bits.append(f"{len(result.added)} added")
+        if result.removed:
+            bits.append(f"{len(result.removed)} removed")
+        console.print(f"[yellow]Coverage changed: {', '.join(bits)} {result.group_dim}(s)[/yellow]")
+        for g in result.added:
+            console.print(f"  [yellow]＋[/yellow] {g.name}  (new: {_fmt_cell(g.new)})")
+        for g in result.removed:
+            console.print(f"  [yellow]－[/yellow] {g.name}  (was: {_fmt_cell(g.old)})")
+    console.print()
+
+
+@app.command("compare")
+def compare_cmd(
+    old: str = typer.Argument(..., help="Baseline report JSON (scan / injection-scan / utility-scan)"),
+    new: str = typer.Argument(..., help="New report JSON to compare against the baseline"),
+    by: Optional[str] = typer.Option(
+        None, "--by",
+        help="Group dimension. injection: probe|defense|carrier|category (default probe). utility: defense|task.",
+    ),
+    soft_fail: bool = typer.Option(
+        False, "--soft-fail", help="Report only; always exit 0 (don't gate CI on regressions)"
+    ),
+) -> None:
+    """Diff two scan reports and flag statistically significant regressions.
+
+    Turns AgentProbe into a regression gate: a per-group change is only called
+    improved/regressed when a two-proportion test clears p<0.05 — everything else
+    is within noise. Exit code: 0 = no significant regression, 2 = regression
+    (fails CI), 1 = error / incompatible reports.
+    """
+    from agentprobe.compare import compare as run_compare
+
+    try:
+        result = run_compare(old, new, by=by)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error: file not found: {e.filename}[/red]")
+        raise typer.Exit(code=1)
+    except (ValueError, KeyError, json.JSONDecodeError) as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    _render_comparison(result, old, new)
+
+    if soft_fail:
+        raise typer.Exit(code=0)
+    raise typer.Exit(code=2 if result.has_regression else 0)
+
+
 def _validate_backend(backend: str) -> None:
     """Reject unknown backends and warn (don't fail) if the API key is missing."""
     from agentprobe.injection.tool_agent import PROVIDERS, required_key
@@ -419,7 +517,6 @@ def utility_scan(
 def _export_rows(base: str, rows: list, meta: dict, fieldnames: list[str]) -> None:
     """Write harness rows to <base>.csv and a {meta, rows} bundle to <base>.json."""
     import csv
-    import json
     base = base[:-4] if base.endswith(".csv") else base
     with open(f"{base}.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
