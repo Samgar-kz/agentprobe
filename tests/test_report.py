@@ -12,7 +12,7 @@ from rich.console import Console
 from agentprobe.engine import ScanReport
 from agentprobe.attacks import AttackResult
 from agentprobe.report import write_json, render_console
-from agentprobe.metrics import ScanMetrics, OracleMetrics, HTTPMetrics
+from agentprobe.metrics import ScanMetrics, OracleMetrics
 
 
 def create_sample_report() -> ScanReport:

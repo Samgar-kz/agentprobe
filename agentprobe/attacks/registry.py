@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agentprobe.attacks.base import Attack, Severity
-from agentprobe.attacks.transforms import ALL_TRANSFORMS, LinguisticTransform
+from agentprobe.attacks.transforms import ALL_TRANSFORMS
 
 
 @dataclass

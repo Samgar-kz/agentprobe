@@ -5,9 +5,7 @@ Mocks the LLM call to test oracle behavior without API calls.
 
 from __future__ import annotations
 
-import json
-import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -337,7 +335,7 @@ def test_evaluate_truncates_inputs(oracle):
         long_intent = "X" * 1000
         long_response = "Y" * 2000
 
-        result = oracle.evaluate(
+        oracle.evaluate(
             intent=long_intent,
             target_response=long_response,
             attack_type="leak",

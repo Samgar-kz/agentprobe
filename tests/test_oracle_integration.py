@@ -5,7 +5,6 @@ Tests the judge() function with both semantic and legacy oracles.
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -196,7 +195,7 @@ def test_judge_semantic_with_min_confidence_override(simple_attack, monkeypatch)
 
         response = AgentResponse(text="Some response", tool_calls=[])
 
-        result = judge(
+        judge(
             simple_attack,
             response,
             oracle_type="semantic",

@@ -17,7 +17,7 @@ from agentprobe.attacks import Attack, AttackResult, all_attacks
 from agentprobe.oracle import judge
 from agentprobe.target import Target
 from agentprobe.logging_config import get_logger
-from agentprobe.metrics import ScanMetrics, OracleMetrics
+from agentprobe.metrics import ScanMetrics
 
 logger = get_logger("engine")
 

@@ -1,9 +1,8 @@
 """Tests for attack catalogue and transforms."""
 
-import pytest
 
 from agentprobe.attacks import all_attacks
-from agentprobe.attacks.base import Attack, Severity
+from agentprobe.attacks.base import Severity
 from agentprobe.attacks.transforms import PRAGMATIC, REGISTER, DISCOURSE, CODESWITCH, CLASSIC
 
 

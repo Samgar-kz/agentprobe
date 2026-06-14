@@ -188,6 +188,32 @@ privilege hierarchy in the prompt buys little.** (The separate-screening defense
 `llm_filter` was not included in this run — add `--llm-filter` to evaluate it; it
 costs an extra model call per data item, reported as overhead.)
 
+## Evidence — reproduce every number
+
+Every headline claim above traces to a committed dataset and a single command, so
+a skeptic can re-derive the numbers rather than take them on trust. The findings
+from the injection battery are judged by **deterministic detectors**, so they
+reproduce **offline** (no API key, exact numbers); only the oracle-agreement
+figure needs a key.
+
+| Claim | Dataset | Command | Output |
+|---|---|---|---|
+| **#2** datamarking wins (`spotlight` 2.0%), `instr_hierarchy` ≈ baseline (21.1%) | `data/gpt4omini.csv` (N=700/defense) | `agentprobe analyze data/gpt4omini.csv` | leak rate by defense + 95% CI |
+| **#3** memory poisoning > inbox (28.6% vs 20.2%, p=0.009); RAG ≈ inbox (18.5%, p=0.53) | `rag_memory_scan.csv` | `agentprobe analyze rag_memory_scan.csv` | leak rate by channel + two-proportion p vs email |
+| **Oracle** 87.5% agreement, Cohen's kappa 0.75 | `data/oracle_labeled.jsonl` (N=24 human-labeled) | `OPENAI_API_KEY=… agentprobe validate-oracle` | agreement, kappa, confusion matrix |
+
+Or run them all at once:
+
+```bash
+make reproduce         # findings #2 and #3 — offline, no API key
+make validate-oracle   # oracle agreement/kappa — needs OPENAI_API_KEY
+```
+
+`agentprobe analyze` recomputes leak rate by defense and by channel (with Wilson
+95% CIs and a two-proportion test of each channel against the inbox-email
+baseline) directly from any committed injection-scan CSV — no model call, since
+the battery is judged deterministically.
+
 ## How To Use
 
 ### Test Your Own Agent
@@ -334,9 +360,13 @@ agentprobe utility-scan --repeats 3 --llm-filter --out utility_results
 
 ```
 agentprobe/
-├── oracle_semantic.py          # LLM-as-judge using gpt-4o-mini (scan path)
+├── oracle_base.py              # Unified Oracle ABC: Deterministic / Semantic / Hybrid + Verdict
+├── oracle_semantic.py          # LLM-as-judge engine using gpt-4o-mini (scan path)
 ├── oracle_legacy.py            # Fallback: substring matching
-├── oracle.py                   # Oracle interface
+├── oracle.py                   # Legacy judge() dispatcher (attacks/scan path)
+├── oracle_validation.py        # Oracle-vs-human agreement (validate-oracle command)
+├── analyze.py                  # Offline leak-rate analysis from a committed CSV
+├── compare.py                  # Regression diff between two reports (significance-gated)
 ├── adapters/
 │   ├── dummy.py               # Built-in intentionally-vulnerable agent simulator
 │   ├── http.py                # Test any HTTP-accessible agent (sync)

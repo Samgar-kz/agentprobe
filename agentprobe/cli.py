@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Optional
 
@@ -359,6 +360,89 @@ def compare_cmd(
     raise typer.Exit(code=2 if result.has_regression else 0)
 
 
+@app.command("analyze")
+def analyze_cmd(
+    csv_path: str = typer.Argument(..., help="Injection-scan CSV (e.g. data/gpt4omini.csv or rag_memory_scan.csv)"),
+    show_probes: bool = typer.Option(False, "--probes", help="Also break down by probe"),
+) -> None:
+    """Recompute leak rate by defense and channel from a committed CSV (offline).
+
+    Reproducibility: every headline number traces to a committed CSV and this one
+    command — no API key, no model call (the injection battery is judged by
+    deterministic detectors, so the result is a pure function of the CSV).
+    """
+    from rich.table import Table
+
+    from agentprobe.analyze import analyze_injection
+
+    try:
+        res = analyze_injection(csv_path)
+    except FileNotFoundError:
+        console.print(f"[red]Error: file not found: {csv_path}[/red]")
+        raise typer.Exit(code=1)
+    except (ValueError, KeyError) as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    t = res.total
+    console.print(
+        f"\n[bold]{csv_path}[/bold]  —  overall leak rate "
+        f"{t.rate*100:.1f}% ({t.leaks}/{t.n})\n"
+    )
+
+    def _rate_table(title, groups, sig=None):
+        tab = Table(title=title, header_style="bold magenta", title_justify="left")
+        tab.add_column("Group")
+        tab.add_column("Leaks/N", justify="right")
+        tab.add_column("Leak rate [95% CI]", justify="right")
+        if sig:
+            tab.add_column("vs email", justify="right")
+        for g in groups:
+            p, lo, hi = g.ci
+            style = _ci_style(p, lo, hi)
+            row = [g.name, f"{g.leaks}/{g.n}",
+                   f"[{style}]{p*100:.1f}% [{lo*100:.1f}-{hi*100:.1f}][/{style}]"]
+            if sig:
+                pv = res.channel_vs_email.get(g.name)
+                row.append("—" if pv is None else f"p={pv:.3f} {'✓' if pv < 0.05 else 'n.s.'}")
+            tab.add_row(*row)
+        console.print(tab)
+        console.print()
+
+    _rate_table("Leak rate by defense", res.by_defense)
+    _rate_table("Leak rate by channel", res.by_channel, sig=True)
+    if show_probes:
+        _rate_table("Leak rate by probe", res.by_probe)
+
+
+@app.command("validate-oracle")
+def validate_oracle_cmd(
+    dataset: Optional[str] = typer.Option(None, "--dataset", help="Labeled JSONL (default: data/oracle_labeled.jsonl)"),
+    min_confidence: float = typer.Option(0.0, "--min-confidence", help="Min confidence for the judge to call a leak"),
+    model: Optional[str] = typer.Option(None, "--model", help="Override the judge model (LLM_MODEL)"),
+) -> None:
+    """Validate the semantic judge against human labels (agreement + Cohen's kappa).
+
+    Reproduces the README oracle-validation number. Requires OPENAI_API_KEY —
+    one model call per labeled case (~cents on the seed set).
+    """
+    from agentprobe.oracle_validation import DEFAULT_DATASET, format_report
+    from agentprobe.oracle_validation import validate_oracle as run_validate
+
+    if not os.environ.get("OPENAI_API_KEY"):
+        console.print("[yellow]OPENAI_API_KEY not set — the semantic oracle needs it to run.[/yellow]")
+        raise typer.Exit(code=2)
+    try:
+        res = run_validate(
+            dataset=dataset or DEFAULT_DATASET, min_confidence=min_confidence, model=model
+        )
+    except Exception as e:
+        console.print(f"[red]Validation failed: {e}[/red]")
+        raise typer.Exit(code=1)
+    console.print(format_report(res))
+    raise typer.Exit(code=0)
+
+
 def _validate_backend(backend: str) -> None:
     """Reject unknown backends and warn (don't fail) if the API key is missing."""
     from agentprobe.injection.tool_agent import PROVIDERS, required_key
@@ -548,29 +632,8 @@ def health(
         "OpenAI API": False,
     }
 
-    try:
-        import httpx
-        checks["httpx"] = True
-    except ImportError:
-        pass
-
-    try:
-        import pydantic
-        checks["pydantic"] = True
-    except ImportError:
-        pass
-
-    try:
-        import typer
-        checks["typer"] = True
-    except ImportError:
-        pass
-
-    try:
-        import rich
-        checks["rich"] = True
-    except ImportError:
-        pass
+    for _mod in ("httpx", "pydantic", "typer", "rich"):
+        checks[_mod] = find_spec(_mod) is not None
 
     try:
         from agentprobe.oracle_semantic import SemanticOracle

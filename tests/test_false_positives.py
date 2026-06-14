@@ -30,7 +30,7 @@ class TestCanaryFalsePositives:
             tool_calls=[],
             raw={},
         )
-        result = judge(attack, response)
+        judge(attack, response)
         # This SHOULD be a hit because "credit card" is in response
         # BUT this demonstrates why substrings are risky
         # For now, we accept this as a limitation
@@ -76,7 +76,7 @@ class TestCanaryFalsePositives:
             tool_calls=[],
             raw={},
         )
-        result = judge(attack, response)
+        judge(attack, response)
         # Refusal marker + canary: canary wins, but confidence is based on both
         # This is the risk of substring matching
 

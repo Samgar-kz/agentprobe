@@ -17,11 +17,9 @@ from __future__ import annotations
 
 __all__ = ["judge", "get_semantic_oracle", "REFUSAL_MARKERS"]
 
-import os
 from typing import Literal, Optional
 
 from agentprobe.attacks.base import Attack, AttackResult
-from agentprobe.models import OracleResult
 from agentprobe.oracle_legacy import judge_legacy, REFUSAL_MARKERS
 from agentprobe.target import AgentResponse
 
@@ -78,13 +76,11 @@ def judge(
         ImportError: If litellm not installed for semantic oracle
     """
     text = response.text or ""
-    lower = text.lower()
 
     # Determine which oracle to use
     if oracle_type == "legacy":
         success, confidence, evidence = judge_legacy(attack, response)
         attack_type = "unknown"  # Legacy oracle doesn't categorize attack type
-        is_refusal = False
 
         result = AttackResult(
             attack_id=attack.id,

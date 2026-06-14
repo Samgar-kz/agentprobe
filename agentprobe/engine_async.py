@@ -19,7 +19,6 @@ from typing import Literal, Optional
 
 from agentprobe.attacks import Attack, AttackResult, all_attacks
 from agentprobe.oracle import judge
-from agentprobe.adapters.http_async import AsyncHTTPAgent
 from agentprobe.target import Target
 
 
@@ -107,9 +106,6 @@ async def run_scan_async(
     errors: list[str] = []
     semaphore = asyncio.Semaphore(semaphore_limit)
     
-    # Track results to maintain order
-    result_dict: dict[int, AttackResult] = {}
-
     async def run_one(attack: Attack, idx: int) -> tuple[int, AttackResult]:
         """Run a single attack with semaphore to limit concurrency.
         

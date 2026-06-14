@@ -3,7 +3,7 @@
 import pytest
 from agentprobe.adapters import DummyVulnerableAgent, HTTPAgent
 from agentprobe.adapters.http_async import AsyncHTTPAgent
-from agentprobe.target import AgentResponse, Message
+from agentprobe.target import AgentResponse
 
 
 class TestDummyVulnerableAgent:
