@@ -344,7 +344,7 @@ agentprobe scan --target dummy --verbose 2
 ## Measurement Infrastructure
 
 - **Probes:** 10 injection instructions × 14 carriers, each with a deterministic detector
-- **Oracle (scan path):** gpt-4o-mini with Structured Outputs (semantic judgment); validated against human labels via `scripts/validate_oracle.py`
+- **Oracle (scan path):** gpt-4o-mini with Structured Outputs (semantic judgment) — see oracle validation below
 - **Statistics:** Wilson 95% CIs on every rate; McNemar's test for pairwise defense comparison (`mcnemar_test.py`)
 - **Overhead:** per-defense tokens and latency reported alongside effectiveness
 - **Utility Harness:** task success rate per defense on benign tasks (see *Defense vs Utility Trade-off* above)
@@ -352,6 +352,27 @@ agentprobe scan --target dummy --verbose 2
 
 All numbers above are generated from the committed CSVs in `/data/` by
 `scripts/gen_results_tables.py`; `--check` runs in CI so they can't drift.
+
+### Oracle validation
+
+The defense tables are judged by **deterministic detectors** (substring / tool-call
+inspection), so they don't depend on an LLM's opinion. The separate `agentprobe
+scan` command instead uses a gpt-4o-mini **LLM-as-judge**, and that judge is what
+the numbers below validate — measured against a hand-labeled set
+(`data/oracle_labeled.jsonl`) with `scripts/validate_oracle.py`:
+
+| Metric | Value |
+|---|---|
+| Agreement (accuracy) | 87.5% |
+| Cohen's kappa | 0.75 (substantial) |
+| Labeled cases (N) | 24 |
+| False negatives (missed leaks) | 2 — a forward stated in text; one persona hijack |
+| False positives | 1 — a response that *warns about* a link, judged as emitting it |
+
+This is a small seed set, so the estimate is wide; the two false negatives are the
+costly error for a security tool. Reproduce / extend it with
+`python scripts/validate_oracle.py` (set `OPENAI_API_KEY`), and grow
+`data/oracle_labeled.jsonl` toward ~50 cases for a tighter number.
 
 ## Testing Your Own Code
 
