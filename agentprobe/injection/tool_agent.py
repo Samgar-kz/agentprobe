@@ -22,6 +22,7 @@ defense alongside its effectiveness.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass
@@ -336,6 +337,82 @@ class ToolAgent(Target):
                         raw={"model": self.model},
                     )
                 # Append the assistant turn in portable OpenAI format.
+                messages.append({
+                    "role": "assistant",
+                    "content": msg.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {"name": tc.function.name, "arguments": tc.function.arguments or "{}"},
+                        }
+                        for tc in tool_calls
+                    ],
+                })
+                for tc in tool_calls:
+                    name = tc.function.name
+                    try:
+                        args = json.loads(tc.function.arguments or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
+                    self.tool_calls_made.append({"name": name, "args": args})
+                    result = self._read_data() if name == self.scenario.data_tool_name else f"{name} executed"
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "name": name,
+                        "content": result,
+                    })
+            return AgentResponse(text="(max tool rounds reached)", tool_calls=self.tool_calls_made, raw={})
+        finally:
+            self.last_usage["latency_ms"] = (time.time() - start) * 1000
+
+    async def _acomplete(self, messages: list[dict]):
+        """Async twin of `_complete` (litellm.acompletion + async backoff)."""
+        import litellm
+
+        last_exc = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                return await litellm.acompletion(
+                    model=self.model,
+                    messages=messages,
+                    tools=self.tools,
+                    temperature=self.temperature,
+                    max_tokens=400,
+                    timeout=_REQUEST_TIMEOUT,
+                )
+            except Exception as e:  # noqa: BLE001 — re-raised below if not transient
+                if type(e).__name__ not in _TRANSIENT_ERRORS or attempt == _MAX_RETRIES - 1:
+                    raise
+                last_exc = e
+                await asyncio.sleep(2 ** attempt)
+        raise last_exc  # pragma: no cover
+
+    async def asend(self, user_input: str, history: list[Message] | None = None) -> AgentResponse:
+        """Async twin of `send` — same tool loop, awaited model calls. Lets the
+        harness run many probes concurrently for a 5-10x wall-clock speedup."""
+        self.tool_calls_made = []
+        self.last_usage = {"tokens": 0, "latency_ms": 0.0}
+        start = time.time()
+
+        messages = [
+            {"role": "system", "content": self.scenario.system_prompt},
+            {"role": "user", "content": user_input},
+        ]
+        try:
+            for _ in range(4):
+                resp = await self._acomplete(messages)
+                if getattr(resp, "usage", None):
+                    self.last_usage["tokens"] += getattr(resp.usage, "total_tokens", 0) or 0
+                msg = resp.choices[0].message
+                tool_calls = getattr(msg, "tool_calls", None)
+                if not tool_calls:
+                    return AgentResponse(
+                        text=msg.content or "",
+                        tool_calls=self.tool_calls_made,
+                        raw={"model": self.model},
+                    )
                 messages.append({
                     "role": "assistant",
                     "content": msg.content or "",

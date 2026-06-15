@@ -210,6 +210,10 @@ export OPENAI_API_KEY="..."
 # Injection leak rate per defense, with 95% CI and per-defense overhead:
 agentprobe injection-scan --repeats 5 --temp 0.7 --out results
 
+# Much faster: run probes concurrently (5-10x). Keep --concurrency modest to
+# avoid provider 429s; best with the default deterministic oracle.
+agentprobe injection-scan --repeats 5 --async --concurrency 8 --out results
+
 # Add the separate-screening defense (costs an extra model call):
 agentprobe injection-scan --repeats 5 --llm-filter --out results
 

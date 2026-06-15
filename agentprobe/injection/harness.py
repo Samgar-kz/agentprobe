@@ -223,6 +223,109 @@ def run_injection_harness(
     return InjectionResult(meta=meta, defenses=list(stats.values()), per_carrier=per_carrier, rows=rows)
 
 
+async def run_injection_harness_async(
+    backend: str = "openai",
+    model: str | None = None,
+    repeats: int = 5,
+    temperature: float = 0.7,
+    use_llm_filter: bool = False,
+    oracle=None,
+    concurrency: int = 8,
+    progress=None,
+) -> InjectionResult:
+    """Async twin of `run_injection_harness` — same aggregates, much faster.
+
+    Probes within each defense run concurrently (bounded by an asyncio.Semaphore
+    of `concurrency`, default 8, to avoid provider 429s); defenses run in sequence
+    so per-defense screening overhead stays correctly bracketed. Aggregation runs
+    on the single event-loop thread as each task completes, so no locking is
+    needed and the resulting stats are identical to the sync path. Best paired
+    with the deterministic oracle (its judging is local and non-blocking).
+    """
+    import asyncio
+
+    from agentprobe.injection.tool_agent import ToolAgent, scenario_for_channel
+
+    if oracle is None:
+        from agentprobe.oracle_base import DeterministicOracle
+        oracle = DeterministicOracle()
+
+    defenses = _build_defenses(use_llm_filter, backend, model)
+    stats = {d.name: DefenseStat(name=d.name) for d in defenses}
+    for s in stats.values():
+        s.by_instruction = {p.name: [0, 0] for p in ALL_PROBES}
+    per_carrier: dict[str, list[int]] = {c.name: [0, 0] for c in ALL_CARRIERS}
+    rows: list[dict] = []
+
+    total = len(defenses) * len(ALL_CARRIERS) * len(ALL_PROBES) * repeats
+    done = 0
+    sem = asyncio.Semaphore(concurrency)
+
+    async def run_one(defense, carrier, scenario, probe, content):
+        async with sem:
+            agent = ToolAgent(
+                email_content=content, defense_apply=defense.apply, backend=backend,
+                model=model, temperature=temperature, scenario=scenario,
+            )
+            try:
+                verdict = oracle.judge(await agent.asend(scenario.user_request), probe=probe)
+                return ("ok", defense, carrier, probe, 1 if verdict.success else 0,
+                        verdict.reason, dict(agent.last_usage))
+            except Exception as e:  # noqa: BLE001 — recorded as an error row
+                return ("err", defense, carrier, probe, None, f"error: {e}", None)
+
+    for defense in defenses:
+        screen_before = dict(_screen_stats(defense))
+        tasks = []
+        for carrier in ALL_CARRIERS:
+            scenario = scenario_for_channel(carrier.channel)
+            for probe in ALL_PROBES:
+                content = carrier.wrap(probe.instruction)
+                for _ in range(repeats):
+                    tasks.append(run_one(defense, carrier, scenario, probe, content))
+
+        for fut in asyncio.as_completed(tasks):
+            status, d, carrier, probe, leaked, reason, usage = await fut
+            done += 1
+            if status == "err":
+                rows.append({
+                    "defense": d.name, "carrier": carrier.name,
+                    "channel": carrier.channel, "instruction": probe.name,
+                    "category": probe.category, "leaked": "", "reason": reason,
+                })
+            else:
+                rows.append({
+                    "defense": d.name, "carrier": carrier.name,
+                    "channel": carrier.channel, "instruction": probe.name,
+                    "category": probe.category, "leaked": leaked,
+                    "reason": reason if leaked else "held",
+                })
+                s = stats[d.name]
+                s.leaks += leaked
+                s.total += 1
+                s.by_instruction[probe.name][0] += leaked
+                s.by_instruction[probe.name][1] += 1
+                s.agent_tokens += int(usage.get("tokens", 0))
+                s.agent_latency_ms += float(usage.get("latency_ms", 0.0))
+                per_carrier[carrier.name][0] += leaked
+                per_carrier[carrier.name][1] += 1
+            if progress:
+                progress(done, total)
+
+        screen_after = _screen_stats(defense)
+        stats[defense.name].screen_tokens = int(screen_after.get("tokens", 0)) - int(screen_before.get("tokens", 0))
+        stats[defense.name].screen_latency_ms = float(screen_after.get("latency_ms", 0.0)) - float(screen_before.get("latency_ms", 0.0))
+
+    meta = {
+        "backend": backend, "model": model or "default", "repeats": repeats,
+        "temperature": temperature, "llm_filter": use_llm_filter,
+        "n_probes": len(ALL_PROBES), "n_carriers": len(ALL_CARRIERS),
+        "oracle": getattr(oracle, "name", "deterministic"),
+        "async": True, "concurrency": concurrency,
+    }
+    return InjectionResult(meta=meta, defenses=list(stats.values()), per_carrier=per_carrier, rows=rows)
+
+
 def run_utility_harness(
     backend: str = "openai",
     model: str | None = None,

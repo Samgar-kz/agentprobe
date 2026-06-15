@@ -518,6 +518,8 @@ def injection_scan(
     temp: float = typer.Option(0.7, "--temp", help="Sampling temperature (>0 needed for variance)"),
     llm_filter: bool = typer.Option(False, "--llm-filter", help="Also evaluate the separate-screening defense (extra cost)"),
     oracle: str = typer.Option("deterministic", "--oracle", help="Judge: deterministic (free, exact) | hybrid (detector + LLM recall) | semantic (LLM only). hybrid/semantic need OPENAI_API_KEY."),
+    use_async: bool = typer.Option(False, "--async", help="Run probes concurrently for a 5-10x speedup (best with --oracle deterministic)"),
+    concurrency: int = typer.Option(8, "--concurrency", help="Max concurrent requests when --async (keep modest to avoid provider 429s)"),
     out: Optional[str] = typer.Option(None, "--out", help="Write raw results to <out>.csv and <out>.json"),
 ) -> None:
     """Measure indirect-injection leak rate per defense, with 95% CI and overhead.
@@ -532,6 +534,9 @@ def injection_scan(
 
     _validate_backend(backend)
 
+    if use_async and oracle != "deterministic":
+        console.print("[yellow]Note: --async with a non-deterministic oracle serializes the LLM judge; deterministic is recommended for --async.[/yellow]")
+
     try:
         oracle_obj = get_oracle(oracle)
     except ValueError as e:
@@ -542,9 +547,10 @@ def injection_scan(
 
     from agentprobe.injection.instructions import ALL_PROBES
     from agentprobe.injection.carriers import ALL_CARRIERS
+    mode = f"async x{concurrency}" if use_async else "sync"
     console.print(
         f"[bold cyan]Injection harness[/bold cyan]  backend={backend} "
-        f"model={model or 'default'} repeats={repeats} temp={temp} oracle={oracle} "
+        f"model={model or 'default'} repeats={repeats} temp={temp} oracle={oracle} {mode} "
         f"probes={len(ALL_PROBES)} carriers={len(ALL_CARRIERS)}\n"
     )
     if temp == 0:
@@ -555,10 +561,20 @@ def injection_scan(
         with Live(spinner, console=console, refresh_per_second=8) as live:
             def progress(done: int, total: int) -> None:
                 live.update(Spinner("dots", text=f"[{done}/{total}]"))
-            result = run_injection_harness(
-                backend=backend, model=model, repeats=repeats,
-                temperature=temp, use_llm_filter=llm_filter, oracle=oracle_obj, progress=progress,
-            )
+            if use_async:
+                import asyncio
+
+                from agentprobe.injection.harness import run_injection_harness_async
+                result = asyncio.run(run_injection_harness_async(
+                    backend=backend, model=model, repeats=repeats,
+                    temperature=temp, use_llm_filter=llm_filter, oracle=oracle_obj,
+                    concurrency=concurrency, progress=progress,
+                ))
+            else:
+                result = run_injection_harness(
+                    backend=backend, model=model, repeats=repeats,
+                    temperature=temp, use_llm_filter=llm_filter, oracle=oracle_obj, progress=progress,
+                )
     except Exception as e:
         console.print(f"[red]Harness failed: {e}[/red]")
         raise typer.Exit(code=1)
