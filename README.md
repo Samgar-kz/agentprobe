@@ -64,11 +64,13 @@ plus one observation that is *not* yet backed by a frontier-model run:
    - Privilege tagging (`instr_hierarchy`) is consistently the weakest — at or near baseline
    - Absolute leak rates differ widely by model (haiku ≪ gemini < deepseek < gpt-4o-mini); treat them as relative rankings
 
-3. **Memory poisoning is the most dangerous channel; RAG and tool output are not**
-   - On gpt-4o-mini, an injection recalled from the agent's own long-term **memory** leaks significantly more than the same injection in an inbox email (31.4% vs 18.5%, two-proportion p<0.001)
-   - **RAG / retrieved knowledge base** (20.3%, p=0.49) and **poisoned tool output** (13.2%, p=0.07) are statistically indistinguishable from email — the "it's internal / it's a tool result, so trust it" intuition did *not* raise leaks; only memory did
-   - **Framing within a channel dominates:** a memory entry phrased as a "standing user instruction" is the single worst carrier (40.9%), a retrieved FAQ Q/A never leaked (0%), and a structured tool "note" field (17.3%) leaks ~2× a free-text search snippet (9.1%)
-   - Single-model result (gpt-4o-mini, repeats=2, N=220–660/channel) from `full_channel_scan.csv`; not yet replicated cross-model
+3. **Channel risk is model-specific — even the memory effect reverses across models**
+   - On **gpt-4o-mini**, an injection recalled from the agent's own long-term **memory** leaks far more than the same injection in an inbox email (31.4% vs 18.5%, two-proportion p<0.001) — memory is the *most* dangerous channel
+   - On **deepseek-chat** the same test **reverses**: memory is the *safest* channel (0.5% vs 5.5% email, p=0.001). So "memory poisoning is worst" is a gpt-4o-mini artifact, not a general property
+   - **RAG / retrieved knowledge base** and **poisoned tool output** are ≈ email on both models — no "it's internal / it's a tool result, so trust it" effect
+   - **What is stable cross-model is the *defense* ranking, not the *channel* ranking** (see Finding #2): `instr_hierarchy` weakest, datamarking/sandwich strongest on both models
+   - Within-channel framing matters on gpt-4o-mini: a memory "standing user instruction" is the worst carrier (40.9%), a retrieved FAQ never leaks (0%), a structured tool "note" field (17.3%) leaks ~2× a search snippet (9.1%)
+   - Datasets: `full_channel_scan.csv` (gpt-4o-mini), `deepseek_channel_scan.csv` (deepseek), both repeats=2, N=220–660/channel
 
 4. **(Not yet validated on frontier models) Surface-level linguistic transforms add little**
    - Pragmatic implicature, register shifts, and code-switching are included as
@@ -165,9 +167,11 @@ poisoning), and `tool_output` (poisoned web-search / API results). They deliver
 the same probes through content that carries *implied trust* — a retrieved chunk,
 a recalled memory note, a tool result — unlike an inbox email. The four AUTOGEN
 tables above predate these channels; the full 21-carrier battery is scored
-separately in `full_channel_scan.csv` (gpt-4o-mini, repeats=2) and analyzed in
-Key Findings #3 / the Evidence section. Headline: memory poisoning leaks
-significantly more than inbox email, while RAG and tool output do not.
+separately in `full_channel_scan.csv` (gpt-4o-mini) and `deepseek_channel_scan.csv`
+(deepseek), both repeats=2, and analyzed in Key Findings #3 / the Evidence section.
+Headline: the memory effect is **model-specific** — the worst channel on
+gpt-4o-mini, reversed to the safest on deepseek; only the *defense* ranking is
+stable across models.
 
 **Model robustness ranking (baseline `none`):** claude-haiku-4-5 (0.6%) ≫
 gemini-2.5-flash (5.6%) > deepseek-chat (9.4%) > gpt-4o-mini (21.1%). Absolute
@@ -202,7 +206,7 @@ figure needs a key.
 | Claim | Dataset | Command | Output |
 |---|---|---|---|
 | **#2** datamarking wins (`spotlight` 2.0%), `instr_hierarchy` ≈ baseline (21.1%) | `data/gpt4omini.csv` (N=700/defense) | `agentprobe analyze data/gpt4omini.csv` | leak rate by defense + 95% CI |
-| **#3** memory poisoning > inbox (31.4% vs 18.5%, p<0.001); RAG (20.3%) & tool output (13.2%) ≈ inbox | `full_channel_scan.csv` | `agentprobe analyze full_channel_scan.csv` | leak rate by channel + two-proportion p vs email |
+| **#3** memory effect is model-specific: worst on gpt-4o-mini (31.4% vs 18.5%, p<0.001), reversed to safest on deepseek (0.5% vs 5.5%, p=0.001) | `full_channel_scan.csv`, `deepseek_channel_scan.csv` | `agentprobe analyze full_channel_scan.csv` (and `… deepseek_channel_scan.csv`) | leak rate by channel + two-proportion p vs email |
 | **Oracle** 87.5% agreement, Cohen's kappa 0.75 | `data/oracle_labeled.jsonl` (N=24 human-labeled) | `OPENAI_API_KEY=… agentprobe validate-oracle` | agreement, kappa, confusion matrix |
 
 Or run them all at once:

@@ -27,6 +27,8 @@ reproduce:
 	$(PYTHON) -m agentprobe.cli analyze data/gpt4omini.csv
 	@echo "== Finding #3 — channels incl. RAG/memory/tool_output (gpt-4o-mini, repeats=2) =="
 	$(PYTHON) -m agentprobe.cli analyze full_channel_scan.csv
+	@echo "== Finding #3 cross-model — memory effect reverses on deepseek (repeats=2) =="
+	$(PYTHON) -m agentprobe.cli analyze deepseek_channel_scan.csv
 
 # Oracle agreement / Cohen's kappa vs human labels. Needs OPENAI_API_KEY
 # (one model call per labeled case — cents on the seed set).
