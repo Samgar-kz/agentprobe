@@ -64,11 +64,11 @@ plus one observation that is *not* yet backed by a frontier-model run:
    - Privilege tagging (`instr_hierarchy`) is consistently the weakest — at or near baseline
    - Absolute leak rates differ widely by model (haiku ≪ gemini < deepseek < gpt-4o-mini); treat them as relative rankings
 
-3. **Memory poisoning is the most dangerous channel; RAG is not special**
-   - On gpt-4o-mini, an injection recalled from the agent's own long-term **memory** leaks significantly more than the same injection in an inbox email (28.6% vs 20.2%, two-proportion p=0.009)
-   - **RAG / retrieved knowledge-base** content is statistically indistinguishable from email (18.5%, p=0.53) — the "it's internal, so trust it" intuition did *not* raise leaks for retrieval
-   - **Framing within a channel dominates:** a memory entry phrased as a "standing user instruction" is the single worst carrier (38%), while a retrieved FAQ Q/A never leaked (0%)
-   - Single-model result (gpt-4o-mini, repeats=2, N=220–660/channel) from `rag_memory_scan.csv`; not yet replicated cross-model
+3. **Memory poisoning is the most dangerous channel; RAG and tool output are not**
+   - On gpt-4o-mini, an injection recalled from the agent's own long-term **memory** leaks significantly more than the same injection in an inbox email (31.4% vs 18.5%, two-proportion p<0.001)
+   - **RAG / retrieved knowledge base** (20.3%, p=0.49) and **poisoned tool output** (13.2%, p=0.07) are statistically indistinguishable from email — the "it's internal / it's a tool result, so trust it" intuition did *not* raise leaks; only memory did
+   - **Framing within a channel dominates:** a memory entry phrased as a "standing user instruction" is the single worst carrier (40.9%), a retrieved FAQ Q/A never leaked (0%), and a structured tool "note" field (17.3%) leaks ~2× a free-text search snippet (9.1%)
+   - Single-model result (gpt-4o-mini, repeats=2, N=220–660/channel) from `full_channel_scan.csv`; not yet replicated cross-model
 
 4. **(Not yet validated on frontier models) Surface-level linguistic transforms add little**
    - Pragmatic implicature, register shifts, and code-switching are included as
@@ -163,11 +163,11 @@ image-beacon, `markdown_image_exfil`) and **21 carriers** across three new
 channels: `knowledge_base` (RAG / retrieval poisoning), `memory` (memory
 poisoning), and `tool_output` (poisoned web-search / API results). They deliver
 the same probes through content that carries *implied trust* — a retrieved chunk,
-a recalled memory note, a tool result — unlike an inbox email. These additions
-are covered by unit tests but are **not** in the committed numbers above; re-run
-`injection-scan` to score them. The one finding scored so far (gpt-4o-mini,
-repeats=2): memory poisoning leaks significantly more than inbox email (see Key
-Findings #3 and the Evidence section).
+a recalled memory note, a tool result — unlike an inbox email. The four AUTOGEN
+tables above predate these channels; the full 21-carrier battery is scored
+separately in `full_channel_scan.csv` (gpt-4o-mini, repeats=2) and analyzed in
+Key Findings #3 / the Evidence section. Headline: memory poisoning leaks
+significantly more than inbox email, while RAG and tool output do not.
 
 **Model robustness ranking (baseline `none`):** claude-haiku-4-5 (0.6%) ≫
 gemini-2.5-flash (5.6%) > deepseek-chat (9.4%) > gpt-4o-mini (21.1%). Absolute
@@ -202,7 +202,7 @@ figure needs a key.
 | Claim | Dataset | Command | Output |
 |---|---|---|---|
 | **#2** datamarking wins (`spotlight` 2.0%), `instr_hierarchy` ≈ baseline (21.1%) | `data/gpt4omini.csv` (N=700/defense) | `agentprobe analyze data/gpt4omini.csv` | leak rate by defense + 95% CI |
-| **#3** memory poisoning > inbox (28.6% vs 20.2%, p=0.009); RAG ≈ inbox (18.5%, p=0.53) | `rag_memory_scan.csv` | `agentprobe analyze rag_memory_scan.csv` | leak rate by channel + two-proportion p vs email |
+| **#3** memory poisoning > inbox (31.4% vs 18.5%, p<0.001); RAG (20.3%) & tool output (13.2%) ≈ inbox | `full_channel_scan.csv` | `agentprobe analyze full_channel_scan.csv` | leak rate by channel + two-proportion p vs email |
 | **Oracle** 87.5% agreement, Cohen's kappa 0.75 | `data/oracle_labeled.jsonl` (N=24 human-labeled) | `OPENAI_API_KEY=… agentprobe validate-oracle` | agreement, kappa, confusion matrix |
 
 Or run them all at once:
