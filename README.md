@@ -341,6 +341,8 @@ conflict, defense evaluation wins.
 - Memory-poisoning evolution (cross-session persistence, tool write-back memory).
 - Multi-tool traces where one tool's output poisons a later tool call.
 
+Release history: see [CHANGELOG.md](CHANGELOG.md).
+
 ## Key Findings from Our Research
 
 Our testing on gpt-4o-mini and claude-haiku-4-5 reveals three data-backed findings,
