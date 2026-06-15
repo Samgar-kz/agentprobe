@@ -4,9 +4,10 @@ HTTPAgent is imported lazily to avoid requiring httpx when only the
 in-process dummy is used (useful for tests / minimal installs).
 """
 
+from agentprobe.adapters.callable import CallableTarget
 from agentprobe.adapters.dummy import DummyVulnerableAgent
 
-__all__ = ["DummyVulnerableAgent", "HTTPAgent"]
+__all__ = ["CallableTarget", "DummyVulnerableAgent", "HTTPAgent"]
 
 
 def __getattr__(name):

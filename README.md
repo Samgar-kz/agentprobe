@@ -85,6 +85,26 @@ agentprobe scan \
 cat results.json | jq '.statistics'
 ```
 
+**Test an in-process agent (no HTTP server).** Hand AgentProbe any
+`fn(prompt: str) -> str` via `CallableTarget` — the 80/20 adapter for LangChain /
+LlamaIndex / CrewAI / your own loop, without maintaining a brittle per-framework
+integration:
+
+```python
+from agentprobe.adapters import CallableTarget
+from agentprobe.attacks import all_attacks
+from agentprobe.engine import run_scan
+
+def my_agent(prompt: str) -> str:
+    return my_chain.invoke(prompt)            # any framework
+
+report = run_scan(CallableTarget(my_agent), all_attacks())
+```
+
+The callable may return a `str`, a `dict` (`{"text": ..., "tool_calls": [...]}`),
+or an `AgentResponse` (return tool calls so tool-abuse detectors see them). From
+the CLI, point at a dotted path: `agentprobe scan --target callable:myagent:run`.
+
 ### GitHub Action (CI/CD gate)
 
 Gate your pipeline on injection resistance. The action wraps `agentprobe scan`,
@@ -99,7 +119,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: Samgar-kz/agentprobe@v1.1
+      - uses: Samgar-kz/agentprobe@v1.2
         with:
           target: http
           endpoint: https://my-agent.internal/chat
@@ -513,6 +533,7 @@ agentprobe/
 ├── compare.py                  # Regression diff between two reports (significance-gated)
 ├── adapters/
 │   ├── dummy.py               # Built-in intentionally-vulnerable agent simulator
+│   ├── callable.py            # CallableTarget — wrap any fn(prompt)->str (in-process)
 │   ├── http.py                # Test any HTTP-accessible agent (sync)
 │   └── http_async.py          # Async HTTP adapter for concurrent scans
 ├── injection/

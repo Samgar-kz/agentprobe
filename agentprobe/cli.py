@@ -59,7 +59,27 @@ def _resolve_target(
 
     if target == "dummy":
         return DummyVulnerableAgent()
-    
+
+    # In-process Python agent: --target callable:module:function (no HTTP server).
+    if target.startswith("callable:"):
+        spec = target[len("callable:"):]
+        if ":" not in spec:
+            raise typer.BadParameter(
+                "callable target must be 'callable:module:function' (e.g. callable:myagent:run)"
+            )
+        mod_path, attr = spec.rsplit(":", 1)
+        import importlib
+        import sys
+
+        if "" not in sys.path:
+            sys.path.insert(0, "")  # make modules in the current dir importable
+        try:
+            fn = getattr(importlib.import_module(mod_path), attr)
+        except (ImportError, AttributeError) as e:
+            raise typer.BadParameter(f"could not load callable '{spec}': {e}")
+        from agentprobe.adapters import CallableTarget
+        return CallableTarget(fn, name=attr)
+
     if target == "http" or target == "http_async":
         if not endpoint:
             raise typer.BadParameter(f"--endpoint is required for target={target}")
@@ -83,7 +103,9 @@ def _resolve_target(
                 headers=headers,
             )
     
-    raise typer.BadParameter(f"Unknown target: {target}. Use 'dummy', 'http', or 'http_async'.")
+    raise typer.BadParameter(
+        f"Unknown target: {target}. Use 'dummy', 'http', 'http_async', or 'callable:module:function'."
+    )
 
 
 @app.command()
