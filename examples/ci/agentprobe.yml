@@ -19,11 +19,11 @@ jobs:
       # Simplest possible use: offline self-test against the bundled dummy agent.
       # No secrets, no API calls. Good for verifying the action is wired up.
       - name: AgentProbe (offline self-test)
-        uses: Samgar-kz/agentprobe@v1
+        uses: Samgar-kz/agentprobe@v1.1
 
       # Real use: scan YOUR agent's HTTP endpoint and fail if it leaks.
       - name: AgentProbe (scan my agent)
-        uses: Samgar-kz/agentprobe@v1
+        uses: Samgar-kz/agentprobe@v1.1
         with:
           target: http
           endpoint: https://my-agent.internal/chat

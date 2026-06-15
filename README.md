@@ -9,6 +9,12 @@
 
 A testing framework for measuring your LLM agent's **resistance to indirect prompt injection** and **comparing defense effectiveness**. Tests your own systems or those you have permission to test.
 
+Three things it does:
+
+1. **Measure** — leak rate per defense, with confidence intervals (`injection-scan` / `analyze`).
+2. **Compare & gate** — did a change make your agent *better or worse*? `compare` / `trend` flag only statistically significant regressions and exit non-zero, so they drop straight into CI.
+3. **Reproduce** — every headline number re-derives from a committed CSV with one command (`make reproduce`).
+
 NOT an attack generator or bypass toolkit. NOT for probing other people's systems.
 
 ## Quickstart
@@ -48,6 +54,268 @@ agentprobe scan --target http --endpoint https://my-agent/chat --json-report res
 ### Why this matters
 
 Indirect prompt injection — instructions hidden in the *data* an agent reads (emails, documents, web pages, tool outputs) rather than typed by the user — slips past prompt-level defenses. AgentProbe measures how much your agent leaks under that pressure and which defenses actually reduce it. Full cross-model results are below.
+
+## How To Use
+
+### Test Your Own Agent
+
+> **Note:** The PyPI package is named `agentprobe-injection` (the plain
+> `agentprobe` name was already taken). The import package and CLI command are
+> still `agentprobe`.
+
+```bash
+# Install from PyPI
+pip install agentprobe-injection
+
+# Or install the latest from GitHub
+pip install git+https://github.com/Samgar-kz/agentprobe.git
+
+# Or clone for development
+git clone https://github.com/Samgar-kz/agentprobe.git
+cd agentprobe && pip install -e .
+
+export OPENAI_API_KEY="..."
+
+agentprobe scan \
+  --target dummy \
+  --oracle semantic \
+  --json-report results.json
+
+# Check results
+cat results.json | jq '.statistics'
+```
+
+### GitHub Action (CI/CD gate)
+
+Gate your pipeline on injection resistance. The action wraps `agentprobe scan`,
+maps its exit code to a pass/fail, writes a JSON report, and posts a summary to
+the run. Zero config runs an offline self-test against the bundled agent; point it
+at your endpoint to actually gate. Full template: [examples/ci/agentprobe.yml](examples/ci/agentprobe.yml).
+
+```yaml
+# .github/workflows/agentprobe.yml
+jobs:
+  injection-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Samgar-kz/agentprobe@v1.1
+        with:
+          target: http
+          endpoint: https://my-agent.internal/chat
+          auth-header: ${{ secrets.AGENT_TOKEN }}
+          fail-threshold: "0.0"        # fail the build on any successful injection
+```
+
+Inputs are all optional with CI-friendly defaults (`target: dummy`,
+`oracle: legacy` — offline, no key). Use `oracle: semantic` for the LLM-as-judge
+(set `OPENAI_API_KEY` via `env:`, never as an input). `soft-fail: true` reports
+without failing the build. Outputs: `outcome`, `hits`, `total`, `success-rate`,
+`report-path`. The `dummy` target is a vulnerable fixture and never gates the build.
+
+### Regression tracking
+
+A single scan is a snapshot; what a team actually needs is *did my agent get
+worse?* `agentprobe compare` diffs two report JSONs and flags only
+**statistically significant** changes (pooled two-proportion test, p<0.05) — a
+naive 7%→3% diff on a small sample is noise, and this won't cry wolf on it.
+
+```bash
+agentprobe injection-scan --out scan_001          # baseline — commit scan_001.json
+# ...later, after a prompt / model / tool change...
+agentprobe injection-scan --out scan_002
+agentprobe compare scan_001.json scan_002.json    # exit 2 if anything regressed
+```
+
+```
+Leak rate:  6.3% (101/1600) -> 3.5% (56/1600)   Δ -2.8pp   FAIL
+
+Improved (significant):
+  + markdown_image_exfil   12.5% -> 1.5%   Δ -11.0pp
+Regressed (significant):
+  - enumerate_tools         1.2% -> 7.5%   Δ +6.2pp  ⚠
+Within noise: 1 probe(s)
+```
+
+Note the verdict: the overall leak rate *dropped*, yet the run **FAILs** because
+one probe regressed — a net average can hide a per-probe regression. Exit codes
+match the GitHub Action contract (`0` clean, `2` regression, `1` error), so
+`agentprobe compare baseline.json "$NEW"` drops straight into a CI step to gate
+merges on "no injection regression". Works on `scan`, `injection-scan`, and
+`utility-scan` reports; choose the grouping with `--by`
+(probe/defense/carrier/category), or `--soft-fail` to report without gating.
+
+For more than two points, `agentprobe trend scan_001.json scan_002.json
+scan_003.json …` tracks the rate across an ordered series, testing each step
+against the previous one and flagging only statistically significant moves
+(same exit-code contract). This is the regression-tracking loop — run, commit the
+report, repeat, and `trend` shows whether your agent is drifting worse over time
+without standing up a dashboard.
+
+### Available Defenses to Test
+
+The harness measures effectiveness of these defenses:
+
+1. **`none`** — baseline (no defense applied)
+2. **`delimited`** — wrap data in `<<<UNTRUSTED_DATA_BEGIN>>>...<<<UNTRUSTED_DATA_END>>>` markers
+3. **`spotlight`** — datamarking: mark every data token so the model separates data from instructions
+4. **`sandwich`** — repeat the do-not-obey rule after the data (recency effect)
+5. **`instr_hierarchy`** — tag data with an explicit low privilege level; assert system instructions outrank tool/data content
+6. **`llm_filter`** — separate LLM verification pass to detect/strip injection before execution
+
+Test each against YOUR agent. See which work, which break utility.
+
+### How It Works
+
+1. **Injection probes:** 11 instructions spanning data exfiltration (incl. a zero-click markdown/HTML image beacon), unauthorized actions, system-prompt disclosure, content injection, and behavior hijacking (`agentprobe/injection/instructions.py`), embedded in realistic carriers across six channels — email, document, web page, knowledge base (RAG / retrieval poisoning), long-term memory (memory poisoning), and tool output (poisoned search/API results). The knowledge-base, memory, and tool-output channels route to dedicated agent scenarios (`search_knowledge_base` / `recall_memory` / `web_search` tools) so the probe arrives as *trusted retrieved context or a tool result*, not as an external message.
+2. **Defense Applicator:** Wraps the data with each defense mechanism
+3. **Target Adapter:** Sends to your agent, captures response
+4. **Oracle:** Each probe carries a deterministic detector (substring / tool-call inspection, guarded against counting a *reported* instruction as a leak). The separate `agentprobe scan` path uses a gpt-4o-mini LLM-as-judge.
+5. **Utility Harness:** Runs benign legitimate tasks to ensure defenses don't break normal functionality
+6. **Report:** Table showing defense effectiveness, utility cost, and per-defense overhead (tokens / latency)
+
+### Defense vs Utility Trade-off
+
+A defense is only practical if it preserves utility on legitimate tasks. The
+**gpt-4o-mini — utility** table above (auto-generated from
+`data/utility_gpt4omini.csv`) shows task success rate per defense; 100% means the
+defense introduced no false positives in that run.
+
+In the committed run, the five string-based defenses held 100% success across the
+benign task suite. The benign suite is defined in
+`agentprobe/injection/benign_tasks.py`; it currently includes a *legitimate
+forward* task (the one case where correct behavior requires a tool call a defense
+could wrongly block) that postdates the committed CSV — re-run `utility-scan` to
+score it. The `llm_filter` defense is not in the committed utility CSV; add it
+with `--llm-filter`.
+
+Run your own:
+
+```bash
+agentprobe utility-scan --repeats 3 --temp 0.7 --out utility_results
+# include the screening defense (extra cost):
+agentprobe utility-scan --repeats 3 --llm-filter --out utility_results
+```
+
+## Command-Line Usage
+
+### Reproduce the defense results (no repo clone needed)
+
+The harness behind the tables above ships in the package, so a plain
+`pip install agentprobe-injection` can reproduce the headline numbers:
+
+```bash
+export OPENAI_API_KEY="..."
+
+# Injection leak rate per defense, with 95% CI and per-defense overhead:
+agentprobe injection-scan --repeats 5 --temp 0.7 --out results
+
+# Add the separate-screening defense (costs an extra model call):
+agentprobe injection-scan --repeats 5 --llm-filter --out results
+
+# Anthropic backend:
+agentprobe injection-scan --backend anthropic --model claude-haiku-4-5 --repeats 5
+
+# Utility (false-positive) cost per defense:
+agentprobe utility-scan --repeats 3 --temp 0.7 --out utility_results
+```
+
+#### Cross-provider runs
+
+Backends are routed through [litellm](https://github.com/BerkeleyAI/litellm), so the
+same battery runs against any supported provider — making the defense table
+cross-provider. Select with `--backend` (and optionally `--model`); each backend
+needs its own API key in the environment:
+
+| `--backend` | Default model | Required env key |
+|---|---|---|
+| `openai` | `gpt-4o-mini` | `OPENAI_API_KEY` |
+| `anthropic` | `claude-haiku-4-5` | `ANTHROPIC_API_KEY` |
+| `gemini` | `gemini-2.5-flash` | `GEMINI_API_KEY` |
+| `groq` | `llama-3.3-70b-versatile` | `GROQ_API_KEY` |
+| `deepseek` | `deepseek-chat` | `DEEPSEEK_API_KEY` |
+| `mistral` | `mistral-small-latest` | `MISTRAL_API_KEY` |
+
+```bash
+agentprobe injection-scan --backend gemini --repeats 5 --out data/gemini
+agentprobe injection-scan --backend groq --model llama-3.3-70b-versatile --repeats 5 --out data/groq
+# A bare --model gets the backend's provider prefix; pass a full litellm route
+# (e.g. --model gemini/gemini-1.5-pro) to override the provider entirely.
+```
+
+Both write `<out>.csv` and `<out>.json`. Regenerate the README tables from the
+CSVs (and let CI verify they never drift) with:
+
+```bash
+python scripts/gen_results_tables.py --check    # CI guard
+python scripts/gen_results_tables.py --write    # update README from data/
+
+# Validate the LLM judge against human labels (agreement + Cohen's kappa):
+python scripts/validate_oracle.py
+```
+
+### Basic scan
+```bash
+# Test dummy agent
+agentprobe scan --target dummy
+
+# Test HTTP agent
+agentprobe scan --target http \
+  --endpoint http://localhost:8000/chat \
+  --input-field message \
+  --output-field reply
+```
+
+### Control oracle
+```bash
+# Use semantic oracle (default, requires OPENAI_API_KEY)
+agentprobe scan --target dummy --oracle semantic
+
+# Use legacy oracle (offline, pattern matching)
+agentprobe scan --target dummy --oracle legacy
+
+# Set confidence threshold
+agentprobe scan --target dummy --oracle semantic --min-confidence 0.85
+```
+
+### Reports
+```bash
+# JSON report with statistics
+agentprobe scan --target dummy --json-report results.json
+
+# Verbose logging
+agentprobe scan --target dummy --verbose 2
+```
+
+## Roadmap
+
+**Primary role:** a **defense evaluator** for AI-security engineers — measure how
+your agent leaks under indirect injection and which defenses help. CI gating (the
+GitHub Action, `compare` / `trend`) is the *delivery channel* to a team; the
+benchmark numbers and findings are *outputs*, not the product. When these roles
+conflict, defense evaluation wins.
+
+**Current limitations**
+- Findings are per-model snapshots; channel risk is model-specific — the memory
+  effect even reverses between gpt-4o-mini and deepseek (Finding #3). Treat
+  absolute numbers as model-relative.
+- The committed cross-channel scores are `repeats=2` on two models — not yet a
+  high-N, many-model run.
+- The semantic/hybrid oracle is validated on a small seed set (N=24); the
+  deterministic detectors are the trustworthy default.
+
+**Planned work**
+- **Longitudinal benchmarking** — `trend` already tracks the rate across an
+  ordered series of reports with significance testing; next is a documented
+  workflow (commit a dated scan per run → `agentprobe trend scan_*.json`) so model
+  drift over months is visible, plus a thin `benchmark` wrapper.
+- Score the full 21-carrier battery at higher N across more models.
+- Grow the oracle-validation set toward ~50 labeled cases.
+
+**Future attack surfaces**
+- Vector-store poisoning beyond single-chunk retrieval (multi-hop / ranking manipulation).
+- Memory-poisoning evolution (cross-session persistence, tool write-back memory).
+- Multi-tool traces where one tool's output poisons a later tool call.
 
 ## Key Findings from Our Research
 
@@ -221,148 +489,6 @@ make validate-oracle   # oracle agreement/kappa — needs OPENAI_API_KEY
 baseline) directly from any committed injection-scan CSV — no model call, since
 the battery is judged deterministically.
 
-## How To Use
-
-### Test Your Own Agent
-
-> **Note:** The PyPI package is named `agentprobe-injection` (the plain
-> `agentprobe` name was already taken). The import package and CLI command are
-> still `agentprobe`.
-
-```bash
-# Install from PyPI
-pip install agentprobe-injection
-
-# Or install the latest from GitHub
-pip install git+https://github.com/Samgar-kz/agentprobe.git
-
-# Or clone for development
-git clone https://github.com/Samgar-kz/agentprobe.git
-cd agentprobe && pip install -e .
-
-export OPENAI_API_KEY="..."
-
-agentprobe scan \
-  --target dummy \
-  --oracle semantic \
-  --json-report results.json
-
-# Check results
-cat results.json | jq '.statistics'
-```
-
-### GitHub Action (CI/CD gate)
-
-Gate your pipeline on injection resistance. The action wraps `agentprobe scan`,
-maps its exit code to a pass/fail, writes a JSON report, and posts a summary to
-the run. Zero config runs an offline self-test against the bundled agent; point it
-at your endpoint to actually gate. Full template: [examples/ci/agentprobe.yml](examples/ci/agentprobe.yml).
-
-```yaml
-# .github/workflows/agentprobe.yml
-jobs:
-  injection-scan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Samgar-kz/agentprobe@v1
-        with:
-          target: http
-          endpoint: https://my-agent.internal/chat
-          auth-header: ${{ secrets.AGENT_TOKEN }}
-          fail-threshold: "0.0"        # fail the build on any successful injection
-```
-
-Inputs are all optional with CI-friendly defaults (`target: dummy`,
-`oracle: legacy` — offline, no key). Use `oracle: semantic` for the LLM-as-judge
-(set `OPENAI_API_KEY` via `env:`, never as an input). `soft-fail: true` reports
-without failing the build. Outputs: `outcome`, `hits`, `total`, `success-rate`,
-`report-path`. The `dummy` target is a vulnerable fixture and never gates the build.
-
-### Regression tracking
-
-A single scan is a snapshot; what a team actually needs is *did my agent get
-worse?* `agentprobe compare` diffs two report JSONs and flags only
-**statistically significant** changes (pooled two-proportion test, p<0.05) — a
-naive 7%→3% diff on a small sample is noise, and this won't cry wolf on it.
-
-```bash
-agentprobe injection-scan --out scan_001          # baseline — commit scan_001.json
-# ...later, after a prompt / model / tool change...
-agentprobe injection-scan --out scan_002
-agentprobe compare scan_001.json scan_002.json    # exit 2 if anything regressed
-```
-
-```
-Leak rate:  6.3% (101/1600) -> 3.5% (56/1600)   Δ -2.8pp   FAIL
-
-Improved (significant):
-  + markdown_image_exfil   12.5% -> 1.5%   Δ -11.0pp
-Regressed (significant):
-  - enumerate_tools         1.2% -> 7.5%   Δ +6.2pp  ⚠
-Within noise: 1 probe(s)
-```
-
-Note the verdict: the overall leak rate *dropped*, yet the run **FAILs** because
-one probe regressed — a net average can hide a per-probe regression. Exit codes
-match the GitHub Action contract (`0` clean, `2` regression, `1` error), so
-`agentprobe compare baseline.json "$NEW"` drops straight into a CI step to gate
-merges on "no injection regression". Works on `scan`, `injection-scan`, and
-`utility-scan` reports; choose the grouping with `--by`
-(probe/defense/carrier/category), or `--soft-fail` to report without gating.
-
-For more than two points, `agentprobe trend scan_001.json scan_002.json
-scan_003.json …` tracks the rate across an ordered series, testing each step
-against the previous one and flagging only statistically significant moves
-(same exit-code contract). This is the regression-tracking loop — run, commit the
-report, repeat, and `trend` shows whether your agent is drifting worse over time
-without standing up a dashboard.
-
-### Available Defenses to Test
-
-The harness measures effectiveness of these defenses:
-
-1. **`none`** — baseline (no defense applied)
-2. **`delimited`** — wrap data in `<<<UNTRUSTED_DATA_BEGIN>>>...<<<UNTRUSTED_DATA_END>>>` markers
-3. **`spotlight`** — datamarking: mark every data token so the model separates data from instructions
-4. **`sandwich`** — repeat the do-not-obey rule after the data (recency effect)
-5. **`instr_hierarchy`** — tag data with an explicit low privilege level; assert system instructions outrank tool/data content
-6. **`llm_filter`** — separate LLM verification pass to detect/strip injection before execution
-
-Test each against YOUR agent. See which work, which break utility.
-
-### How It Works
-
-1. **Injection probes:** 11 instructions spanning data exfiltration (incl. a zero-click markdown/HTML image beacon), unauthorized actions, system-prompt disclosure, content injection, and behavior hijacking (`agentprobe/injection/instructions.py`), embedded in realistic carriers across six channels — email, document, web page, knowledge base (RAG / retrieval poisoning), long-term memory (memory poisoning), and tool output (poisoned search/API results). The knowledge-base, memory, and tool-output channels route to dedicated agent scenarios (`search_knowledge_base` / `recall_memory` / `web_search` tools) so the probe arrives as *trusted retrieved context or a tool result*, not as an external message.
-2. **Defense Applicator:** Wraps the data with each defense mechanism
-3. **Target Adapter:** Sends to your agent, captures response
-4. **Oracle:** Each probe carries a deterministic detector (substring / tool-call inspection, guarded against counting a *reported* instruction as a leak). The separate `agentprobe scan` path uses a gpt-4o-mini LLM-as-judge.
-5. **Utility Harness:** Runs benign legitimate tasks to ensure defenses don't break normal functionality
-6. **Report:** Table showing defense effectiveness, utility cost, and per-defense overhead (tokens / latency)
-
-### Defense vs Utility Trade-off
-
-A defense is only practical if it preserves utility on legitimate tasks. The
-**gpt-4o-mini — utility** table above (auto-generated from
-`data/utility_gpt4omini.csv`) shows task success rate per defense; 100% means the
-defense introduced no false positives in that run.
-
-In the committed run, the five string-based defenses held 100% success across the
-benign task suite. The benign suite is defined in
-`agentprobe/injection/benign_tasks.py`; it currently includes a *legitimate
-forward* task (the one case where correct behavior requires a tool call a defense
-could wrongly block) that postdates the committed CSV — re-run `utility-scan` to
-score it. The `llm_filter` defense is not in the committed utility CSV; add it
-with `--llm-filter`.
-
-Run your own:
-
-```bash
-agentprobe utility-scan --repeats 3 --temp 0.7 --out utility_results
-# include the screening defense (extra cost):
-agentprobe utility-scan --repeats 3 --llm-filter --out utility_results
-```
-
 ## Responsible Use
 
 - **Only test systems you own or have written permission to test**
@@ -404,96 +530,6 @@ agentprobe/
 scripts/
 ├── gen_results_tables.py       # Generate/verify README tables from data/*.csv
 └── validate_oracle.py          # Measure LLM-judge agreement vs human labels
-```
-
-## Command-Line Usage
-
-### Reproduce the defense results (no repo clone needed)
-
-The harness behind the tables above ships in the package, so a plain
-`pip install agentprobe-injection` can reproduce the headline numbers:
-
-```bash
-export OPENAI_API_KEY="..."
-
-# Injection leak rate per defense, with 95% CI and per-defense overhead:
-agentprobe injection-scan --repeats 5 --temp 0.7 --out results
-
-# Add the separate-screening defense (costs an extra model call):
-agentprobe injection-scan --repeats 5 --llm-filter --out results
-
-# Anthropic backend:
-agentprobe injection-scan --backend anthropic --model claude-haiku-4-5 --repeats 5
-
-# Utility (false-positive) cost per defense:
-agentprobe utility-scan --repeats 3 --temp 0.7 --out utility_results
-```
-
-#### Cross-provider runs
-
-Backends are routed through [litellm](https://github.com/BerkeleyAI/litellm), so the
-same battery runs against any supported provider — making the defense table
-cross-provider. Select with `--backend` (and optionally `--model`); each backend
-needs its own API key in the environment:
-
-| `--backend` | Default model | Required env key |
-|---|---|---|
-| `openai` | `gpt-4o-mini` | `OPENAI_API_KEY` |
-| `anthropic` | `claude-haiku-4-5` | `ANTHROPIC_API_KEY` |
-| `gemini` | `gemini-2.5-flash` | `GEMINI_API_KEY` |
-| `groq` | `llama-3.3-70b-versatile` | `GROQ_API_KEY` |
-| `deepseek` | `deepseek-chat` | `DEEPSEEK_API_KEY` |
-| `mistral` | `mistral-small-latest` | `MISTRAL_API_KEY` |
-
-```bash
-agentprobe injection-scan --backend gemini --repeats 5 --out data/gemini
-agentprobe injection-scan --backend groq --model llama-3.3-70b-versatile --repeats 5 --out data/groq
-# A bare --model gets the backend's provider prefix; pass a full litellm route
-# (e.g. --model gemini/gemini-1.5-pro) to override the provider entirely.
-```
-
-Both write `<out>.csv` and `<out>.json`. Regenerate the README tables from the
-CSVs (and let CI verify they never drift) with:
-
-```bash
-python scripts/gen_results_tables.py --check    # CI guard
-python scripts/gen_results_tables.py --write    # update README from data/
-
-# Validate the LLM judge against human labels (agreement + Cohen's kappa):
-python scripts/validate_oracle.py
-```
-
-### Basic scan
-```bash
-# Test dummy agent
-agentprobe scan --target dummy
-
-# Test HTTP agent
-agentprobe scan --target http \
-  --endpoint http://localhost:8000/chat \
-  --input-field message \
-  --output-field reply
-```
-
-### Control oracle
-```bash
-# Use semantic oracle (default, requires OPENAI_API_KEY)
-agentprobe scan --target dummy --oracle semantic
-
-# Use legacy oracle (offline, pattern matching)
-agentprobe scan --target dummy --oracle legacy
-
-# Set confidence threshold
-agentprobe scan --target dummy --oracle semantic --min-confidence 0.85
-```
-
-### Reports
-```bash
-# JSON report with statistics
-agentprobe scan --target dummy --json-report results.json
-
-# Verbose logging
-agentprobe scan --target dummy --verbose 2
 ```
 
 ## Measurement Infrastructure
