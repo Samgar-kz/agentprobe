@@ -140,9 +140,12 @@ runs:
         # shellcheck disable=SC2206
         [ -n "$AP_EXTRA_ARGS" ]   && ARGS+=( $AP_EXTRA_ARGS )
 
+        # GitHub runs `shell: bash` with `-e`, so a non-zero scan exit (e.g. the
+        # dummy fixture leaks -> exit 2) would abort this step before we can record
+        # outputs or swallow the dummy code. Capture RC via `|| ` so `-e` doesn't fire.
         echo "+ agentprobe ${ARGS[*]}"
-        agentprobe "${ARGS[@]}"
-        RC=$?
+        RC=0
+        agentprobe "${ARGS[@]}" || RC=$?
         echo "scan exit code: $RC"
 
         python3 "$GITHUB_ACTION_PATH/scripts/ci_outputs.py" "$AP_JSON_REPORT" "$RC"
