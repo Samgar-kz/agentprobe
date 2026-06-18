@@ -16,7 +16,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DATASET = ROOT / "data" / "oracle_labeled.jsonl"
+# Repo layout keeps the dataset at <root>/data/; a pip install bundles it under
+# the package (see pyproject force-include). Prefer the repo copy, fall back to
+# the packaged one, so `validate-oracle` works in both contexts.
+_REPO_DATASET = ROOT / "data" / "oracle_labeled.jsonl"
+_PKG_DATASET = Path(__file__).resolve().parent / "data" / "oracle_labeled.jsonl"
+DEFAULT_DATASET = _REPO_DATASET if _REPO_DATASET.exists() else _PKG_DATASET
 
 
 def cohens_kappa(tp: int, fp: int, tn: int, fn: int) -> float:
