@@ -22,7 +22,7 @@ inputs:
     required: false
     default: "reply"
   auth-header:
-    description: "Authorization header value. Pass a secret, e.g. ${{ secrets.AGENT_TOKEN }}."
+    description: "Authorization header value. Pass a repository secret (e.g. secrets.AGENT_TOKEN) from your workflow."
     required: false
     default: ""
   oracle:
