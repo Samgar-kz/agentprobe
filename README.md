@@ -1,4 +1,4 @@
-# AgentProbe: Defense Evaluation Harness for LLM Agents
+# AgentProbe: Regression-Oriented Injection-Defense Evaluation
 
 [![CI](https://github.com/Samgar-kz/agentprobe/actions/workflows/ci.yml/badge.svg)](https://github.com/Samgar-kz/agentprobe/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -7,13 +7,18 @@
 
 ## What This Is
 
-A testing framework for measuring your LLM agent's **resistance to indirect prompt injection** and **comparing defense effectiveness**. Tests your own systems or those you have permission to test.
+**AgentProbe is a regression-oriented framework for measuring whether prompt-injection defenses become statistically weaker or stronger over time.** Test your own systems, or those you have permission to test.
 
-Three things it does:
+Most scanners answer *"Is there a vulnerability?"* — once. AgentProbe answers
+*"Did the defense regress, and is the change statistically significant?"* — on
+every PR, model bump, or prompt edit. That's a different layer of value from a
+one-shot scan or benchmark.
 
-1. **Measure** — leak rate per defense, with confidence intervals (`injection-scan` / `analyze`).
-2. **Compare & gate** — did a change make your agent *better or worse*? `compare` / `trend` flag only statistically significant regressions and exit non-zero, so they drop straight into CI.
-3. **Reproduce** — every headline number re-derives from a committed CSV with one command (`make reproduce`).
+Three layers, one job:
+
+1. **Compare & gate** *(the point)* — `compare` / `trend` diff runs and flag **only statistically significant** regressions (pooled two-proportion test), exiting non-zero so they gate CI.
+2. **Measure** *(the substrate)* — leak rate per defense with Wilson 95% CIs (`injection-scan` / `analyze`).
+3. **Reproduce** *(the trust)* — every headline number re-derives from a committed CSV with one command (`make reproduce`), judged by **deterministic detectors, not an LLM's opinion**.
 
 NOT an attack generator or bypass toolkit. NOT for probing other people's systems.
 
@@ -328,6 +333,14 @@ conflict, defense evaluation wins.
 - The semantic/hybrid oracle is validated on a small seed set (N=24); the
   deterministic detectors are the trustworthy default.
 
+**Next research hypothesis**
+- **Cross-session persistence of indirect injections** — today's tests measure a
+  single turn (poison → response → score). Real agents live for weeks: does a
+  memory poisoned today survive a session boundary and re-trigger a leak *later*?
+  This moves from one-shot measurement toward injection *durability over time* —
+  which rhymes with the project's regression focus and is a sharper question than
+  another carrier variation.
+
 **Planned work**
 - **Longitudinal benchmarking** — `trend` already tracks the rate across an
   ordered series of reports with significance testing; next is a documented
@@ -496,6 +509,12 @@ a skeptic can re-derive the numbers rather than take them on trust. The findings
 from the injection battery are judged by **deterministic detectors**, so they
 reproduce **offline** (no API key, exact numbers); only the oracle-agreement
 figure needs a key.
+
+> **Canonical datasets.** The official channel-finding data is
+> `full_channel_scan.csv` (gpt-4o-mini), with `deepseek_channel_scan.csv` as the
+> cross-model companion; the per-defense table draws from `data/gpt4omini.csv`
+> (N=700). Any other `scan` / `injection-scan` output is illustrative, not a
+> reference result.
 
 | Claim | Dataset | Command | Output |
 |---|---|---|---|
